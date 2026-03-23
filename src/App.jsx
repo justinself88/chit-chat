@@ -503,7 +503,9 @@ export default function App() {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [cleanupMedia, flushDebateLog, firebaseUserId, firebaseIdToken]);
+    // Intentionally omit firebaseIdToken: token refresh must not reconnect Socket.IO or
+    // matchmaking emits can race / miss `queued`. Auth uses token from first run; optional mode OK.
+  }, [cleanupMedia, flushDebateLog, firebaseUserId]);
 
   const pickTopic = (id) => {
     setTopicId(id);
@@ -520,6 +522,8 @@ export default function App() {
       return;
     }
     if (!sock.connected) sock.connect();
+    // Optimistic UI: server will confirm with `queued` or reject with `queue-error`.
+    setWaiting(true);
     sock.emit('join-queue', { topicId, side: s });
   };
 
@@ -578,6 +582,7 @@ export default function App() {
     setError(null);
     setSide('con');
     if (!sock.connected) sock.connect();
+    setWaiting(true);
     sock.emit('join-custom-room', { side: 'con', roomCode });
   };
 

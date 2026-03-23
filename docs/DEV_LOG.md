@@ -6,6 +6,17 @@ Chronological record of **what changed** and **why**. **`PROJECT_MEMORY.md`** ho
 
 ---
 
+## Session: 2026-03-24 (fix: Quick Match waiting + stable Socket.IO)
+
+### Summary
+
+- Restored **optimistic `setWaiting(true)`** when emitting `join-queue` / `join-custom-room` so the UI shows “searching” immediately (not only after `queued`).
+- Removed **`firebaseIdToken` from the Socket.IO `useEffect` dependency list** so Firebase ID token refresh no longer disconnects/reconnects the socket (avoids races where Pro/Con appeared to do nothing).
+
+### Files
+
+- `src/App.jsx`, `docs/DEV_LOG.md`
+
 ## Session: 2026-03-24 (in-debate text chat)
 
 ### Summary
