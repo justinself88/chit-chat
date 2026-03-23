@@ -14,6 +14,7 @@ import SupportPage from './SupportPage.jsx';
 import { auth, isFirebaseConfigured } from './firebase.js';
 import AudioLevelMeter from './AudioLevelMeter.jsx';
 import DeviceSettings from './DeviceSettings.jsx';
+import DebateChatPanel from './DebateChatPanel.jsx';
 import { getMediaErrorMessage, getUserMediaWithFallback } from './mediaUtils.js';
 import './App.css';
 
@@ -73,6 +74,11 @@ export default function App() {
   const [customJoinMode, setCustomJoinMode] = useState('open');
   const [copyConfirmed, setCopyConfirmed] = useState(false);
   const [customHostWaiting, setCustomHostWaiting] = useState(false);
+  /** Socket.IO id for labeling own chat messages. */
+  const [socketId, setSocketId] = useState(null);
+  /** In-debate text chat (cleared when match ends or opponent leaves). */
+  const [debateChatMessages, setDebateChatMessages] = useState([]);
+  const [debateChatDraft, setDebateChatDraft] = useState('');
   /** Full-screen overlay from header menu: legal doc id, mission, or support. */
   const [headerOverlay, setHeaderOverlay] = useState(null);
 
@@ -202,6 +208,10 @@ export default function App() {
     });
     socketRef.current = socket;
 
+    const syncSocketId = () => setSocketId(socket.id ?? null);
+    socket.on('connect', syncSocketId);
+    if (socket.connected) syncSocketId();
+
     socket.on('connect_error', (err) => {
       const detail = err?.message ? ` (${err.message})` : '';
       setError(`Realtime connection failed${detail}. Please refresh and try again.`);
@@ -236,6 +246,8 @@ export default function App() {
     };
 
     socket.on('matched', async (payload) => {
+      setDebateChatMessages([]);
+      setDebateChatDraft('');
       setWaiting(false);
       setError(null);
       setCustomHostWaiting(false);
@@ -314,6 +326,8 @@ export default function App() {
           });
         }
       } catch (e) {
+        setDebateChatMessages([]);
+        setDebateChatDraft('');
         setError(getMediaErrorMessage(e));
         cleanupMedia();
         setStep('side');
@@ -371,6 +385,8 @@ export default function App() {
     });
 
     socket.on('custom-lobby-waiting', ({ roomCode, statement }) => {
+      setDebateChatMessages([]);
+      setDebateChatDraft('');
       setCustomHostWaiting(true);
       setDebateInfo((prev) => ({
         roomId: null,
@@ -392,7 +408,21 @@ export default function App() {
       setError('Opponent left. Waiting for next challenger...');
     });
 
+    socket.on('debate-chat', ({ text, from, sentAtMs }) => {
+      setDebateChatMessages((prev) => [
+        ...prev,
+        {
+          text,
+          from,
+          sentAtMs,
+          key: `${from}-${sentAtMs}-${prev.length}`,
+        },
+      ]);
+    });
+
     socket.on('peer-kicked', () => {
+      setDebateChatMessages([]);
+      setDebateChatDraft('');
       flushDebateLog('peer_kicked');
       setError('You were removed by the lobby creator.');
       cleanupMedia();
@@ -436,6 +466,8 @@ export default function App() {
 
     socket.on('peer-left', () => {
       if (matchModeRef.current === 'custom' && sideRef.current === 'pro') {
+        setDebateChatMessages([]);
+        setDebateChatDraft('');
         setCustomHostWaiting(true);
         setDebateInfo((prev) => (prev ? { ...prev, roomId: null } : prev));
         if (pcRef.current) {
@@ -449,6 +481,8 @@ export default function App() {
         setError('Opponent left. Waiting for next challenger...');
         return;
       }
+      setDebateChatMessages([]);
+      setDebateChatDraft('');
       flushDebateLog('peer_left');
       setError('Your opponent left the debate.');
       cleanupMedia();
@@ -462,6 +496,8 @@ export default function App() {
     });
 
     return () => {
+      socket.off('connect', syncSocketId);
+      setSocketId(null);
       socket.emit('leave-queue');
       cleanupMedia();
       socket.disconnect();
@@ -566,6 +602,14 @@ export default function App() {
     setError(null);
   };
 
+  const sendDebateChat = () => {
+    const roomId = debateInfo?.roomId;
+    const text = debateChatDraft.trim();
+    if (!roomId || !text) return;
+    socketRef.current?.emit('debate-chat', { roomId, text });
+    setDebateChatDraft('');
+  };
+
   const kickOpponent = () => {
     if (!debateInfo?.roomId) return;
     const ok = window.confirm('Kick this opponent from your lobby? They can rejoin later.');
@@ -574,6 +618,8 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
+    setDebateChatMessages([]);
+    setDebateChatDraft('');
     cleanupMedia();
     setDebateInfo(null);
     setStep('welcome');
@@ -590,6 +636,8 @@ export default function App() {
   };
 
   const endDebate = () => {
+    setDebateChatMessages([]);
+    setDebateChatDraft('');
     flushDebateLog('leave');
     socketRef.current?.emit('leave-debate');
     cleanupMedia();
@@ -993,18 +1041,34 @@ export default function App() {
               </span>
             )}
           </div>
-          <div className="video-grid">
-            <div className="video-wrap">
-              <video ref={localVideoRef} autoPlay playsInline muted />
-              <div className="video-local-overlay">
-                <AudioLevelMeter stream={localStream} compact muted={!micOn} />
+          <div
+            className={
+              debateInfo.roomId ? 'debate-main debate-main--with-chat' : 'debate-main'
+            }
+          >
+            <div className="video-grid">
+              <div className="video-wrap">
+                <video ref={localVideoRef} autoPlay playsInline muted />
+                <div className="video-local-overlay">
+                  <AudioLevelMeter stream={localStream} compact muted={!micOn} />
+                </div>
+                <span className="video-label">You</span>
               </div>
-              <span className="video-label">You</span>
+              <div className="video-wrap">
+                <video ref={remoteVideoRef} autoPlay playsInline />
+                <span className="video-label">Opponent</span>
+              </div>
             </div>
-            <div className="video-wrap">
-              <video ref={remoteVideoRef} autoPlay playsInline />
-              <span className="video-label">Opponent</span>
-            </div>
+            {debateInfo.roomId && (
+              <DebateChatPanel
+                messages={debateChatMessages}
+                draft={debateChatDraft}
+                onDraftChange={setDebateChatDraft}
+                onSend={sendDebateChat}
+                disabled={!debateInfo.roomId}
+                mySocketId={socketId}
+              />
+            )}
           </div>
           {error && <div className="error-banner">{error}</div>}
           {connState === 'failed' && !error && (

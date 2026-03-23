@@ -6,7 +6,7 @@
 |--------|--------|
 | **Site name** | **Chit Chat** |
 | **Project name (npm)** | `chit-chat` (workspace folder: `Debate Website`) |
-| **Last updated** | 2026-03-24 (production QA — cross-machine Quick Match + camera) |
+| **Last updated** | 2026-03-24 (in-debate text chat) |
 | **Database / BaaS** | **Firebase** — **Email/password Auth** + Firestore (`src/firebase.js`, `AuthScreen.jsx`) |
 
 ---
@@ -21,7 +21,7 @@
 
 ## 2. What works today
 
-- UI flow: Welcome → Topic list → Pro/Con → waiting spinner or immediate match → debate view (local + remote video).
+- UI flow: Welcome → Topic list → Pro/Con → waiting spinner or immediate match → debate view (local + remote video + optional **text chat** for links/notes).
 - **Socket.IO:** queue join, match, signaling (`offer` / `answer` / `ice`), `leave-queue`, `leave-debate`, `peer-left` on disconnect or opponent leave. **Rate limit:** `join-queue` is capped per IP (see **`server/rateLimit.js`**, env **`RATE_LIMIT_*`**); `queue-error` may include **`code: 'rate_limited'`**.
 - **WebRTC:** `getUserMedia`, `RTCPeerConnection`, STUN by default; client loads ICE config from **`GET /api/rtc-config`** (optional TURN via `ICE_SERVERS_JSON` on server). **Device picker:** collapsible **Camera & microphone** panel (before a debate) requests permission, lists inputs, preview, and passes `deviceId` constraints into the live call (`DeviceSettings.jsx`, `mediaUtils.js`).
 - **Signaling race handling:** Client buffers Socket.IO `signal` events until `RTCPeerConnection` exists, then flushes (answerer can receive offer before PC is ready).
@@ -88,6 +88,8 @@ Firebase (HTTPS APIs, client SDK) ← used for Auth + Firestore; independent of 
 | `queue-error` | S → C | Invalid topic/side (`ALLOWED_TOPIC_IDS` / validation). |
 | `matched` | S → C | `{ roomId, isOfferer, topicId, yourSide }` — pair found; client starts WebRTC. |
 | `signal` | C ↔ C via S | `{ roomId, type: 'offer' \| 'answer' \| 'ice', payload }` — WebRTC signaling. |
+| `debate-chat` | C → S | `{ roomId, text }` — in-debate text message; relayed to both peers in the Socket.IO room. |
+| `debate-chat` | S → C | `{ text, from, sentAtMs }` — broadcast to everyone in the debate room (including sender). |
 | `leave-queue` | C → S | Leave waiting state. |
 | `leave-debate` | C → S | Voluntarily leave call; server notifies peer (`peer-left`). |
 | `peer-left` | S → C | Opponent disconnected or left. |
@@ -129,6 +131,7 @@ Debate Website/
     chitchat-logo.png    # Logo + favicon
   src/
     App.jsx              # UI + WebRTC client; logged-in header outside .app (app-top-bar)
+    DebateChatPanel.jsx  # In-debate text chat (links + notes)
     HeaderNavMenu.jsx    # Menu dropdown: legal, Our Mission, Support
     MissionPage.jsx      # Our Mission (LegalDocumentShell)
     SupportPage.jsx      # Support / contact (LegalDocumentShell + contactEmail)
@@ -168,6 +171,8 @@ Debate Website/
 | `RATE_LIMIT_JOIN_QUEUE_WINDOW_MS` | Optional. Window length in ms (default **60000**). |
 | `ICE_SERVERS_JSON` | Optional. JSON **array** of ICE server objects. Parsed in `server/rtcConfig.js`. Invalid JSON falls back to default STUN. |
 | `CUSTOM_LOBBY_TTL_MS` | Optional server runtime. Custom lobby idle/stale expiration in ms (default **1800000** = 30 minutes). |
+| `DEBATE_CHAT_MAX_LEN` | Optional. Max characters per chat message (default **2000**, clamped 500–4000). |
+| `DEBATE_CHAT_MAX_PER_MIN` | Optional. Max chat messages per socket per rolling minute (default **30**, minimum **10**). |
 | `REQUIRE_FIREBASE_TOKEN` | Optional server runtime hardening. If `true`, Socket.IO requires a valid Firebase ID token and server startup fails without Firebase Admin credentials. |
 | `FIREBASE_ADMIN_SERVICE_ACCOUNT` | Optional server runtime credential (raw JSON or base64 JSON) for Firebase Admin token verification. Alternative is platform ADC (`GOOGLE_APPLICATION_CREDENTIALS`). |
 | `VITE_FIREBASE_*` | **Client-only** (Vite). `apiKey`, `authDomain`, `projectId`, `storageBucket`, `messagingSenderId`, `appId` from Firebase Console → Project settings → Web app. Enables Auth + Firestore. In Docker/Railway, these must be available at **build time**. |
@@ -233,6 +238,7 @@ Short bullets for the **latest** context; keep recent history; trim only when no
 - **2026-03-23:** **Railway go-live validated** — production app reachable, login and custom rooms working. Added Docker build-stage `VITE_FIREBASE_*` env injection and client socket readiness fix for quick-match side selection in production.
 - **2026-03-23:** **Production matchmaking diagnostics** — added Socket.IO transport fallback guard and client queue/wait UX hardening; Quick Match cross-account pairing remained under active verification in production.
 - **2026-03-24:** **Production QA (two PCs)** — Quick Match + live **video/audio** validated on production (desktop vs laptop, two accounts). Next: custom lobby + kick/rejoin regression; optional token enforcement retest.
+- **2026-03-24:** **In-debate text chat** — Socket.IO `debate-chat` relay in the same room as WebRTC; UI panel (`DebateChatPanel.jsx`) with linkified `https?://` URLs; server max length + per-minute rate limit; chat cleared when match ends or opponent leaves.
 - **2026-03-22:** **Header menu + layout** — **`HeaderNavMenu`** (Legal, Our Mission, Support), **`MissionPage`** / **`SupportPage`**, **`headerOverlay`**. **Viewport-wide header:** **`app-top-bar`** sibling of **`.app`**; **`.app--with-global-header`**; **`#root`** **`overflow-x: clip`**. Mission copy is user-authored. Removed reliance on **`app-header-bleed`** inside `.app` for edge alignment.
 - **2026-03-22:** **In-app reports** — Firestore **`reports`**, **`submitReport`**, **`ReportIssue`** on debate screen; rules updated. **Deploy `firestore.rules`.**
 - **2026-03-22:** **Matchmaking rate limit** — `join-queue` per IP via **`server/rateLimit.js`** (`RATE_LIMIT_JOIN_QUEUE_*` env). **`queue-error`** `rate_limited` handled in **`App.jsx`**.

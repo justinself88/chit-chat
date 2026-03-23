@@ -6,6 +6,23 @@ Chronological record of **what changed** and **why**. **`PROJECT_MEMORY.md`** ho
 
 ---
 
+## Session: 2026-03-24 (in-debate text chat)
+
+### Summary
+
+- Added **text chat during debates** so participants can share links or short notes alongside video.
+- Server: Socket.IO **`debate-chat`** — validates `roomId` matches the active debate, trims message, enforces max length (default 2000 chars) and rolling per-minute rate limit (default 30/min); broadcasts `{ text, from, sentAtMs }` to everyone in the Socket.IO room.
+- Client: **`DebateChatPanel.jsx`** — scrollable message list, textarea + Send, **Enter** sends / **Shift+Enter** newline; `https?://` URLs rendered as external links.
+- Chat history clears when the match ends, opponent leaves, kick, or host returns to solo waiting (custom).
+
+### Files
+
+- `server/index.js`, `src/App.jsx`, `src/App.css`, `src/DebateChatPanel.jsx`, `.env.example`, `docs/PROJECT_MEMORY.md`, `docs/DEV_LOG.md`
+
+### Follow-ups (optional)
+
+- Persist/export chat is out of scope for MVP; server-side moderation could log abusive chat later.
+
 ## Session: 2026-03-24 (production QA — cross-machine WebRTC)
 
 ### Summary

@@ -147,6 +147,17 @@ const metrics = {
   cleanupRecovered: 0,
 };
 
+const debateChatMaxLen = Math.min(
+  4000,
+  Math.max(500, parseInt(process.env.DEBATE_CHAT_MAX_LEN || '2000', 10) || 2000)
+);
+const debateChatPerMinute = Math.max(
+  10,
+  parseInt(process.env.DEBATE_CHAT_MAX_PER_MIN || '30', 10) || 30
+);
+/** Rate limit debate chat per socket id (rolling 60s window). */
+const debateChatRate = new Map();
+
 function logMetrics(reason = 'interval') {
   console.log(
     `[metrics:${reason}] quickJoin=${metrics.quickJoinAttempts} customCreate=${metrics.customCreateAttempts} customJoin=${metrics.customJoinAttempts} matches=${metrics.matches} leaveDebate=${metrics.leaveDebate} peerKicks=${metrics.peerKicks} peerLeft=${metrics.peerLeftEvents} queueErrors=${metrics.queueErrors} cleanup(orphaned=${metrics.cleanupOrphaned},expired=${metrics.cleanupExpired},recovered=${metrics.cleanupRecovered})`
@@ -693,7 +704,40 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('signal', { type, payload, from: socket.id });
   });
 
+  socket.on('debate-chat', ({ roomId, text }) => {
+    if (!roomId || roomId !== socket.data.roomId) return;
+    const raw = String(text ?? '');
+    const trimmed = raw.trim();
+    if (!trimmed.length) return;
+    if (trimmed.length > debateChatMaxLen) {
+      metrics.queueErrors += 1;
+      socket.emit('queue-error', { message: `Message too long (max ${debateChatMaxLen} characters).` });
+      return;
+    }
+    const now = Date.now();
+    let entry = debateChatRate.get(socket.id);
+    if (!entry || now > entry.resetAt) {
+      entry = { count: 0, resetAt: now + 60_000 };
+    }
+    entry.count += 1;
+    debateChatRate.set(socket.id, entry);
+    if (entry.count > debateChatPerMinute) {
+      metrics.queueErrors += 1;
+      socket.emit('queue-error', {
+        code: 'rate_limited',
+        message: 'Too many chat messages. Please wait a moment.',
+      });
+      return;
+    }
+    io.to(roomId).emit('debate-chat', {
+      text: trimmed,
+      from: socket.id,
+      sentAtMs: now,
+    });
+  });
+
   socket.on('disconnect', () => {
+    debateChatRate.delete(socket.id);
     const rid = socket.data.roomId;
     const gameCode = socket.data.customRoomCode;
     let handledCustomDisconnect = false;
