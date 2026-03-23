@@ -66,7 +66,7 @@ export default function DebateChatPanel({
       <div className="debate-chat-compose">
         <textarea
           className="debate-chat-input"
-          rows={2}
+          rows={1}
           maxLength={2000}
           placeholder="Type a message or paste a link…"
           value={draft}
