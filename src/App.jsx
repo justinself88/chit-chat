@@ -4,7 +4,7 @@ import { TOPICS } from './topics.js';
 import DebateHistory from './DebateHistory.jsx';
 import { fetchRecentDebates, logDebateSessionEnd, syncUserPresence } from './chitChatFirestore.js';
 import ReportIssue from './ReportIssue.jsx';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { onIdTokenChanged, signOut } from 'firebase/auth';
 import AuthScreen from './AuthScreen.jsx';
 import BrandLogo from './BrandLogo.jsx';
 import HeaderNavMenu from './HeaderNavMenu.jsx';
@@ -160,15 +160,18 @@ export default function App() {
       setAuthReady(true);
       return;
     }
-    const unsub = onAuthStateChanged(auth, (user) => {
+    const unsub = onIdTokenChanged(auth, async (user) => {
       setFirebaseUserId(user?.uid ?? null);
       setFirebaseIdToken(null);
       if (user) syncUserPresence();
       if (user) {
-        user
-          .getIdToken()
-          .then((t) => setFirebaseIdToken(t))
-          .catch(() => setFirebaseIdToken(null));
+        try {
+          const token = await user.getIdToken();
+          setFirebaseIdToken(token);
+        } catch {
+          // Keep app usable in optional server-auth mode (no token required).
+          setFirebaseIdToken(null);
+        }
       }
       setAuthReady(true);
     });
@@ -190,14 +193,18 @@ export default function App() {
   }, [authReady, firebaseUserId, cleanupMedia]);
 
   useEffect(() => {
-    if (!isFirebaseConfigured || !firebaseUserId || !firebaseIdToken) return;
+    if (!isFirebaseConfigured || !firebaseUserId) return;
 
     const socket = io({
       path: '/socket.io',
       transports: ['websocket', 'polling'],
-      auth: { token: firebaseIdToken },
+      auth: firebaseIdToken ? { token: firebaseIdToken } : {},
     });
     socketRef.current = socket;
+
+    socket.on('connect_error', () => {
+      setError('Realtime connection failed. Please refresh and try again.');
+    });
 
     const processSignal = async ({ type, payload }) => {
       const pc = pcRef.current;
@@ -470,7 +477,16 @@ export default function App() {
     setSide(s);
     setError(null);
     const sock = socketRef.current;
-    if (!sock || !topicId) return;
+    if (!topicId) return;
+    if (!sock) {
+      setError('Realtime connection is still starting. Please try again in a second.');
+      return;
+    }
+    if (!sock.connected) {
+      sock.connect();
+      setError('Connecting to matchmaking… please tap your side again.');
+      return;
+    }
     sock.emit('join-queue', { topicId, side: s });
   };
 
