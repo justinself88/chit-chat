@@ -6,6 +6,42 @@ Chronological record of **what changed** and **why**. **`PROJECT_MEMORY.md`** ho
 
 ---
 
+## Session: 2026-03-24 (production QA — cross-machine WebRTC)
+
+### Summary
+
+- Validated **production** Chit Chat on **two physical machines** (desktop + laptop): two accounts matched via **Quick Match**, **camera and microphone** worked for both sides.
+- Confirms end-to-end: Firebase sign-in, Socket.IO matchmaking/signaling, and **WebRTC** across different networks/PCs.
+
+### Files
+
+- _(none — QA validation only)_
+
+### Follow-ups (planned next)
+
+- Run structured regression on production: **Custom** (open list + code-only), **kick**, **rejoin** (two PCs).
+- Optional: enable `REQUIRE_FIREBASE_TOKEN=true` with `FIREBASE_ADMIN_SERVICE_ACCOUNT` in Railway, then repeat Quick Match smoke test.
+
+## Session: 2026-03-23 (production matchmaking diagnostics + transport hardening)
+
+### Summary
+
+- Continued production debugging after Railway go-live where Quick Match sometimes showed connecting/waiting but did not produce a pair.
+- Added a server safeguard so SPA fallback routing does not intercept Socket.IO transport paths (`/socket.io`), preventing HTTP polling conflicts in production.
+- Improved client socket resilience: clearer `connect_error` detail text, explicit reconnect attempts before emits, and removed forced double-click behavior.
+- Adjusted waiting-state UX so queue spinner appears only after server `queued` acknowledgement (prevents false “searching” state when queue entry was not confirmed).
+- Live endpoint checks validated `/health` and `/socket.io` handshake reachability from production.
+
+### Files
+
+- `server/index.js`, `src/App.jsx`
+
+### Follow-ups (planned next)
+
+- Capture Railway runtime logs during two-user Quick Match attempts to confirm whether both `join-queue` events arrive and with which `topicId`/`side`.
+- If needed, add temporary server-side queue debug logs (join/queued/matched counters per topic) and remove after validation.
+- Re-run full production smoke matrix after Quick Match pairing is consistently confirmed.
+
 ## Session: 2026-03-23 (Railway production go-live + quick match fix)
 
 ### Summary
