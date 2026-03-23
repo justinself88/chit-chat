@@ -6,7 +6,7 @@
 |--------|--------|
 | **Site name** | **Chit Chat** |
 | **Project name (npm)** | `chit-chat` (workspace folder: `Debate Website`) |
-| **Last updated** | 2026-03-23 (operational hardening + kick/rejoin stability fixes) |
+| **Last updated** | 2026-03-23 (Railway go-live + production quick-match socket fix) |
 | **Database / BaaS** | **Firebase** — **Email/password Auth** + Firestore (`src/firebase.js`, `AuthScreen.jsx`) |
 
 ---
@@ -35,6 +35,7 @@
 - **Signed-in header:** Full-width **`app-top-bar`** is a **sibling** of **`.app`** (not inside the max-width column) so the logo/tagline center on the viewport and **Menu** / **Sign out** sit at the **viewport** right (with padding). **`HeaderNavMenu`** opens a dropdown: legal docs → **`LegalViewer`**, plus **Our Mission** (**`MissionPage.jsx`**) and **Support** (**`SupportPage.jsx`** — contact email + in-debate reporting note). Overlays driven by **`headerOverlay`** state in **`App.jsx`**. When logged in, **`.app--with-global-header`** removes duplicate top padding on the main column.
 - **Custom lobbies (new):** In **Custom debates**, users can switch tabs: **Join servers** (live open-lobby browser + **Join by code**) and **Create server** (statement + visibility mode). Visibility options: **Open lobby** (shows in list) or **Code-only** (hidden, code join only). Creating a lobby now places the creator into a waiting debate view immediately; if a challenger leaves, the creator remains in-session and returns to waiting until they end the lobby.
 - **Socket.IO authentication (new):** Socket.IO handshake can optionally verify the user’s Firebase ID token using Firebase Admin SDK. Server enforcement is controlled by environment configuration; when not configured it will not block local development.
+- **Production deployment status (new):** Live on Railway with GitHub auto-deploy. Build-time Firebase client env injection is handled in Docker build stage; Railway variable changes must be applied before redeploy.
 - **Operational hardening (new):** Server adds metrics logs, periodic custom-lobby stale cleanup with TTL sweep/logging, and a single-active-session-per-uid guard to reduce multi-tab/window edge cases.
 - **Custom host moderation (new):** In active custom debates, the creator can **Kick opponent**. Server authorizes only the lobby creator for this action; kicked user returns to custom screen while host remains in waiting-lobby state.
 
@@ -168,7 +169,7 @@ Debate Website/
 | `CUSTOM_LOBBY_TTL_MS` | Optional server runtime. Custom lobby idle/stale expiration in ms (default **1800000** = 30 minutes). |
 | `REQUIRE_FIREBASE_TOKEN` | Optional server runtime hardening. If `true`, Socket.IO requires a valid Firebase ID token and server startup fails without Firebase Admin credentials. |
 | `FIREBASE_ADMIN_SERVICE_ACCOUNT` | Optional server runtime credential (raw JSON or base64 JSON) for Firebase Admin token verification. Alternative is platform ADC (`GOOGLE_APPLICATION_CREDENTIALS`). |
-| `VITE_FIREBASE_*` | **Client-only** (Vite). `apiKey`, `authDomain`, `projectId`, `storageBucket`, `messagingSenderId`, `appId` from Firebase Console → Project settings → Web app. Enables Auth + Firestore. |
+| `VITE_FIREBASE_*` | **Client-only** (Vite). `apiKey`, `authDomain`, `projectId`, `storageBucket`, `messagingSenderId`, `appId` from Firebase Console → Project settings → Web app. Enables Auth + Firestore. In Docker/Railway, these must be available at **build time**. |
 | `VITE_CONTACT_EMAIL` | Optional. Public contact email in **Privacy Policy**, **Recording Agreement**, and **Support** page (header menu; mailto when set). |
 
 Copy `.env.example` to `.env` locally if needed (`.env` is gitignored). For Firebase, enable **Email/Password** under Authentication → Sign-in method; create **Firestore** database when you start writing data.
@@ -204,6 +205,8 @@ Copy `.env.example` to `.env` locally if needed (`.env` is gitignored). For Fire
 - **Kick/rejoin stability:** After host kick (or challenger leave/disconnect), host is re-queued for the lobby, stale peers are skipped in matchmaking, and kicked challengers should not retain host-style room-code state.
 - **Custom lobby cleanup:** A server-side sweep runs every ~60s to remove orphaned/expired custom lobbies. When it changes state, it broadcasts the updated open-lobby list and logs a concise summary (orphaned/expired/recovered counts + codes).
 - **Planned next:** Run a production smoke-test matrix (Quick match + Custom open + Custom code-only + multi-tab safeguard recovery) and review metrics/cleanup logs for the first 24h; then tune `CUSTOM_LOBBY_TTL_MS` if needed and finish any remaining custom-mode copy consistency.
+- **Railway variables:** New/changed vars remain staged until **Apply changes** is clicked in the Railway UI.
+- **Production quick-match reliability:** Socket connection now tolerates temporary ID token unavailability in optional auth mode and shows clearer connection errors instead of a silent side-button no-op.
 - **Firebase:** If keys are missing, the app still runs; only the dev hint appears (in development). If **Email/Password** is not enabled in Console, sign-in or sign-up errors surface on **`AuthScreen`** (`auth/operation-not-allowed`).
 
 ---
@@ -224,6 +227,7 @@ Short bullets for the **latest** context; keep recent history; trim only when no
 - **2026-03-23:** **Custom lobby cleanup** — periodic stale-lobby sweep with TTL (`CUSTOM_LOBBY_TTL_MS`) plus server logs and automatic refresh of open-lobby list when cleanup changes state.
 - **2026-03-23:** **Host kick controls** — custom-lobby creator can kick challenger (with client confirmation) and continue hosting the same lobby.
 - **2026-03-23:** **Kick/rejoin bugfix validated** — fixed stuck "Joining debate..." rejoin path after kick by re-queuing host and clearing kicked challenger local state.
+- **2026-03-23:** **Railway go-live validated** — production app reachable, login and custom rooms working. Added Docker build-stage `VITE_FIREBASE_*` env injection and client socket readiness fix for quick-match side selection in production.
 - **2026-03-22:** **Header menu + layout** — **`HeaderNavMenu`** (Legal, Our Mission, Support), **`MissionPage`** / **`SupportPage`**, **`headerOverlay`**. **Viewport-wide header:** **`app-top-bar`** sibling of **`.app`**; **`.app--with-global-header`**; **`#root`** **`overflow-x: clip`**. Mission copy is user-authored. Removed reliance on **`app-header-bleed`** inside `.app` for edge alignment.
 - **2026-03-22:** **In-app reports** — Firestore **`reports`**, **`submitReport`**, **`ReportIssue`** on debate screen; rules updated. **Deploy `firestore.rules`.**
 - **2026-03-22:** **Matchmaking rate limit** — `join-queue` per IP via **`server/rateLimit.js`** (`RATE_LIMIT_JOIN_QUEUE_*` env). **`queue-error`** `rate_limited` handled in **`App.jsx`**.

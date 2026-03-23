@@ -6,6 +6,31 @@ Chronological record of **what changed** and **why**. **`PROJECT_MEMORY.md`** ho
 
 ---
 
+## Session: 2026-03-23 (Railway production go-live + quick match fix)
+
+### Summary
+
+- Successfully deployed **Chit Chat** to Railway from GitHub and validated live sign-in/custom-room flows in production.
+- Fixed production environment injection for Vite Firebase keys by updating the Docker build stage to accept/pass `VITE_FIREBASE_*` variables at build time.
+- Fixed a production quick-match issue where pressing **Pro/Con** could appear to do nothing if Socket.IO connected before Firebase token availability settled.
+- Client now establishes Socket.IO for signed-in users in optional auth mode, surfaces clearer connection errors, and retries matchmaking connection gracefully.
+
+### Files
+
+- `Dockerfile`, `src/App.jsx`
+
+### Deployment notes
+
+- Railway variables must be **applied** (pending changes are not active until Apply is clicked).
+- `VITE_FIREBASE_*` values are consumed at **build time** in Dockerized deploys.
+- Current production setting remains `REQUIRE_FIREBASE_TOKEN=false` until Firebase Admin credential handling is finalized in Railway.
+
+### Follow-ups (planned next)
+
+- Rotate leaked Firebase service-account key and replace local credential file.
+- Add secure Firebase Admin credential in Railway, then switch `REQUIRE_FIREBASE_TOKEN=true`.
+- Run and record a short production smoke matrix (Quick match + Custom open/code + kick/rejoin).
+
 ## Session: 2026-03-23 (kick/rejoin bugfix + host queue recovery)
 
 ### Summary

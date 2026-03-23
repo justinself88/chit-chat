@@ -192,7 +192,9 @@ app.get('/api/rtc-config', (_req, res) => {
 
 if (existsSync(dist)) {
   app.use(express.static(dist));
-  app.get('*', (req, res) => {
+  app.get('*', (req, res, next) => {
+    // Let Socket.IO HTTP transport endpoints bypass SPA fallback.
+    if (req.path.startsWith('/socket.io')) return next();
     res.sendFile(join(dist, 'index.html'));
   });
 }
