@@ -202,8 +202,9 @@ export default function App() {
     });
     socketRef.current = socket;
 
-    socket.on('connect_error', () => {
-      setError('Realtime connection failed. Please refresh and try again.');
+    socket.on('connect_error', (err) => {
+      const detail = err?.message ? ` (${err.message})` : '';
+      setError(`Realtime connection failed${detail}. Please refresh and try again.`);
     });
 
     const processSignal = async ({ type, payload }) => {
@@ -482,11 +483,8 @@ export default function App() {
       setError('Realtime connection is still starting. Please try again in a second.');
       return;
     }
-    if (!sock.connected) {
-      sock.connect();
-      setError('Connecting to matchmaking… please tap your side again.');
-      return;
-    }
+    if (!sock.connected) sock.connect();
+    setWaiting(true);
     sock.emit('join-queue', { topicId, side: s });
   };
 
@@ -521,22 +519,31 @@ export default function App() {
 
   const createCustomGame = () => {
     const sock = socketRef.current;
-    if (!sock) return;
+    if (!sock) {
+      setError('Realtime connection is still starting. Please try again in a second.');
+      return;
+    }
     const statement = customStatement.trim();
     if (statement.length < 8) {
       setError('Add a statement with at least 8 characters.');
       return;
     }
     setError(null);
+    if (!sock.connected) sock.connect();
     sock.emit('create-custom-game', { statement, joinMode: customJoinMode });
   };
 
   const joinCustomGame = (roomCode) => {
     const sock = socketRef.current;
-    if (!sock) return;
+    if (!sock) {
+      setError('Realtime connection is still starting. Please try again in a second.');
+      return;
+    }
     setCustomRoomCode(roomCode);
     setError(null);
     setSide('con');
+    if (!sock.connected) sock.connect();
+    setWaiting(true);
     sock.emit('join-custom-room', { side: 'con', roomCode });
   };
 
