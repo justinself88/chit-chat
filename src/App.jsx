@@ -484,7 +484,6 @@ export default function App() {
       return;
     }
     if (!sock.connected) sock.connect();
-    setWaiting(true);
     sock.emit('join-queue', { topicId, side: s });
   };
 
@@ -543,7 +542,6 @@ export default function App() {
     setError(null);
     setSide('con');
     if (!sock.connected) sock.connect();
-    setWaiting(true);
     sock.emit('join-custom-room', { side: 'con', roomCode });
   };
 
