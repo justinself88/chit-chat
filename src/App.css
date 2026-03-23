@@ -751,9 +751,9 @@
   box-sizing: border-box;
 }
 
-/* You = cyan / sky (matches app accent) */
+/* You (your messages) = left, cyan / sky */
 .debate-chat-msg--self {
-  align-self: flex-end;
+  align-self: flex-start;
   background: linear-gradient(
     145deg,
     rgba(56, 189, 248, 0.22) 0%,
@@ -763,9 +763,9 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
-/* Opponent = violet / purple (distinct from “You”) */
+/* Opponent = right, violet / purple */
 .debate-chat-msg--peer {
-  align-self: flex-start;
+  align-self: flex-end;
   background: linear-gradient(
     145deg,
     rgba(167, 139, 250, 0.2) 0%,
@@ -786,12 +786,12 @@
 
 .debate-chat-msg--self .debate-chat-msg-label {
   color: #7dd3fc;
-  text-align: right;
+  text-align: left;
 }
 
 .debate-chat-msg--peer .debate-chat-msg-label {
   color: #d8b4fe;
-  text-align: left;
+  text-align: right;
 }
 
 .debate-chat-msg-body {
