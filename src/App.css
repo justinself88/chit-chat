@@ -1086,6 +1086,25 @@
   white-space: nowrap;
 }
 
+.custom-statement-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.custom-statement-hint strong {
+  color: var(--text);
+}
+
+.custom-statement-ready {
+  color: #86efac;
+  font-weight: 600;
+}
+
+.custom-browser-error {
+  margin-bottom: 0.75rem;
+}
+
 .custom-table-wrap {
   border: 1px solid var(--border);
   border-radius: 10px;

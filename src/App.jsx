@@ -569,6 +569,8 @@ export default function App() {
     }
     setError(null);
     if (!sock.connected) sock.connect();
+    // Clear any stale quick/custom queue on the server before creating a lobby
+    sock.emit('leave-queue');
     sock.emit('create-custom-game', { statement, joinMode: customJoinMode });
   };
 
@@ -793,6 +795,12 @@ export default function App() {
             </button>
           </div>
 
+          {error && step === 'custom' && (
+            <div className="error-banner custom-browser-error" role="alert">
+              {error}
+            </div>
+          )}
+
           {customTab === 'create' && (
             <div className="custom-tab-panel">
               <h3 className="custom-subtitle">Create server</h3>
@@ -819,11 +827,36 @@ export default function App() {
                   value={customStatement}
                   onChange={(e) => setCustomStatement(e.target.value)}
                   maxLength={240}
+                  autoComplete="off"
                 />
-                <button type="button" className="btn btn-primary custom-create-btn" onClick={createCustomGame}>
+                <button
+                  type="button"
+                  className="btn btn-primary custom-create-btn"
+                  onClick={createCustomGame}
+                  disabled={customStatement.trim().length < 8}
+                  title={
+                    customStatement.trim().length < 8
+                      ? 'Type at least 8 characters to publish your lobby'
+                      : undefined
+                  }
+                >
                   Publish statement
                 </button>
               </div>
+              <p className="custom-statement-hint" aria-live="polite">
+                {customStatement.trim().length < 8 ? (
+                  <>
+                    <strong>
+                      {customStatement.trim().length}/8
+                    </strong>{' '}
+                    characters — add a few more to publish.
+                  </>
+                ) : (
+                  <span className="custom-statement-ready">
+                    Ready to publish ({customStatement.trim().length} characters)
+                  </span>
+                )}
+              </p>
             </div>
           )}
 
@@ -931,7 +964,6 @@ export default function App() {
               </button>
             </div>
           )}
-          {error && step === 'custom' && <div className="error-banner">{error}</div>}
           {!waiting && (
             <button type="button" className="back-btn" onClick={() => setStep('welcome')}>
               Back

@@ -663,7 +663,18 @@ io.on('connection', (socket) => {
   socket.on('leave-debate', () => {
     metrics.leaveDebate += 1;
     const rid = socket.data.roomId;
-    if (!rid) return;
+    if (!rid) {
+      // Custom host waiting alone (no WebRTC room yet) — still must remove lobby + queue state
+      if (socket.data.matchType === 'custom' && socket.data.customRoomCode) {
+        const game = customGames.get(socket.data.customRoomCode);
+        if (game && game.createdBy === socket.id) {
+          customGames.delete(socket.data.customRoomCode);
+        }
+        clearMatchmaking();
+        emitCustomGamesUpdate();
+      }
+      return;
+    }
 
     if (socket.data.matchType === 'custom' && socket.data.customRoomCode) {
       const game = customGames.get(socket.data.customRoomCode);
