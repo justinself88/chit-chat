@@ -721,6 +721,9 @@
 
 .debate-chat-messages {
   /* Take all space between header + compose (parent must have explicit height) */
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
   flex: 1 1 0;
   min-height: 7rem;
   min-width: 0;
@@ -740,33 +743,84 @@
 }
 
 .debate-chat-msg {
-  margin-bottom: 0.65rem;
+  max-width: 92%;
+  padding: 0.5rem 0.65rem;
+  border-radius: 12px;
+  border: 1px solid transparent;
   word-break: break-word;
+  box-sizing: border-box;
 }
 
-.debate-chat-msg:last-child {
-  margin-bottom: 0;
+/* You = cyan / sky (matches app accent) */
+.debate-chat-msg--self {
+  align-self: flex-end;
+  background: linear-gradient(
+    145deg,
+    rgba(56, 189, 248, 0.22) 0%,
+    rgba(14, 165, 233, 0.12) 100%
+  );
+  border-color: rgba(56, 189, 248, 0.45);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* Opponent = violet / purple (distinct from “You”) */
+.debate-chat-msg--peer {
+  align-self: flex-start;
+  background: linear-gradient(
+    145deg,
+    rgba(167, 139, 250, 0.2) 0%,
+    rgba(139, 92, 246, 0.1) 100%
+  );
+  border-color: rgba(167, 139, 250, 0.42);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
 .debate-chat-msg-label {
   display: block;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-  margin-bottom: 0.2rem;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
 }
 
 .debate-chat-msg--self .debate-chat-msg-label {
-  color: var(--accent-strong);
+  color: #7dd3fc;
+  text-align: right;
+}
+
+.debate-chat-msg--peer .debate-chat-msg-label {
+  color: #d8b4fe;
+  text-align: left;
 }
 
 .debate-chat-msg-body {
   white-space: pre-wrap;
   line-height: 1.45;
+  color: var(--text);
 }
 
+.debate-chat-msg--self .debate-chat-msg-body {
+  text-align: left; /* easier to read than full right-align */
+}
+
+.debate-chat-msg--self .debate-chat-link {
+  color: #e0f2fe;
+}
+
+.debate-chat-msg--peer .debate-chat-link {
+  color: #ddd6fe;
+}
+
+.debate-chat-msg--self .debate-chat-link:hover {
+  color: #fff;
+}
+
+.debate-chat-msg--peer .debate-chat-link:hover {
+  color: #fff;
+}
+
+/* Default link style when not in a bubble (shouldn’t happen) */
 .debate-chat-link {
   color: #7dd3fc;
   text-decoration: underline;
