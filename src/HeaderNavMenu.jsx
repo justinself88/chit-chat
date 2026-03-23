@@ -1,0 +1,91 @@
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
+
+const LEGAL_ITEMS = [
+  { id: 'terms', label: 'Terms of Service' },
+  { id: 'privacy', label: 'Privacy Policy' },
+  { id: 'community', label: 'Community Guidelines' },
+  { id: 'recording', label: 'Recording & streaming consent' },
+];
+
+/**
+ * Header “more” menu: legal docs, mission, support — easy to extend with more entries later.
+ */
+export default function HeaderNavMenu({ onPickLegal, onPickMission, onPickSupport }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  const menuId = useId();
+
+  const close = useCallback(() => setOpen(false), []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) close();
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') close();
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open, close]);
+
+  const pickLegal = (id) => {
+    onPickLegal(id);
+    close();
+  };
+  const pickMission = () => {
+    onPickMission();
+    close();
+  };
+  const pickSupport = () => {
+    onPickSupport();
+    close();
+  };
+
+  return (
+    <div className="header-nav" ref={rootRef}>
+      <button
+        type="button"
+        className="btn btn-ghost header-nav-trigger"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-controls={menuId}
+        onClick={() => setOpen((v) => !v)}
+      >
+        Menu
+        <span className="header-nav-chevron" aria-hidden>
+          {open ? '▴' : '▾'}
+        </span>
+      </button>
+      {open && (
+        <div id={menuId} className="header-nav-panel" role="menu">
+          <div className="header-nav-group-label" role="presentation">
+            Legal
+          </div>
+          {LEGAL_ITEMS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className="header-nav-item"
+              role="menuitem"
+              onClick={() => pickLegal(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+          <div className="header-nav-sep" role="separator" />
+          <button type="button" className="header-nav-item" role="menuitem" onClick={pickMission}>
+            Our Mission
+          </button>
+          <button type="button" className="header-nav-item" role="menuitem" onClick={pickSupport}>
+            Support
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

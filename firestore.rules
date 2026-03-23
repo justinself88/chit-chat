@@ -1,0 +1,47 @@
+rules_version = '2';
+
+// Paste into Firebase Console → Firestore → Rules, or: firebase deploy --only firestore:rules
+// Requires any Firebase Auth user (signed-in). Email/password accounts in this app.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    match /debates/{debateId} {
+      allow create: if request.auth != null
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.topicId is string
+        && request.resource.data.yourSide in ['pro', 'con']
+        && request.resource.data.reason is string
+        && request.resource.data.startedAtMs is int
+        && request.resource.data.endedAtMs is int
+        && request.resource.data.durationSec is int
+        // Optional fields for newer custom-lobby mode.
+        && (!('matchMode' in request.resource.data) || request.resource.data.matchMode in ['quick', 'custom'])
+        && (!('roomCode' in request.resource.data) || request.resource.data.roomCode is string)
+        && (!('statement' in request.resource.data) || request.resource.data.statement is string);
+
+      allow read: if request.auth != null && resource.data.uid == request.auth.uid;
+
+      allow update, delete: if false;
+    }
+
+    match /reports/{reportId} {
+      allow create: if request.auth != null
+        && request.resource.data.reporterUid == request.auth.uid
+        && request.resource.data.topicId is string
+        && request.resource.data.yourSide in ['pro', 'con']
+        && request.resource.data.category in ['harassment', 'spam', 'other']
+        && request.resource.data.details is string
+        && request.resource.data.details.size() > 0
+        && request.resource.data.details.size() <= 2000
+        && (request.resource.data.roomId == null || request.resource.data.roomId is string);
+
+      allow read: if request.auth != null && resource.data.reporterUid == request.auth.uid;
+
+      allow update, delete: if false;
+    }
+  }
+}

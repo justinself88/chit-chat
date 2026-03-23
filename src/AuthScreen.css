@@ -1,0 +1,232 @@
+/* Full-viewport auth (Create account / Sign in) — scoped under .auth-screen */
+
+.auth-screen {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 2rem 1.25rem 3rem;
+  box-sizing: border-box;
+  background: transparent;
+  color: var(--text);
+}
+
+.auth-screen-inner {
+  width: 100%;
+  max-width: 420px;
+}
+
+.auth-screen-card {
+  background: var(--surface-glass);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 1.75rem 1.5rem 1.5rem;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(12px);
+}
+
+.auth-screen-logo-wrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.auth-screen-logo-wrap .brand-logo {
+  max-width: 220px;
+}
+
+.auth-screen-title {
+  margin: 0 0 0.35rem;
+  font-family: var(--display);
+  font-size: 1.4rem;
+  font-weight: 600;
+  text-align: center;
+  color: #fff;
+}
+
+.auth-screen-lead {
+  margin: 0 0 1.25rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.auth-screen .auth-tabs {
+  margin-bottom: 0.75rem;
+}
+
+.auth-screen .auth-tab {
+  border-color: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.65);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.auth-screen .auth-tab--active {
+  border-color: var(--accent-border);
+  color: var(--accent-strong);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.auth-screen-alt-link {
+  display: block;
+  width: 100%;
+  margin: 0 0 1.25rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 0.95rem;
+  font-weight: 500;
+  text-align: center;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+
+.auth-screen-alt-link:hover {
+  color: var(--accent-strong);
+}
+
+.auth-screen .auth-label,
+.auth-screen-label {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.auth-screen .auth-input {
+  background: rgba(0, 0, 0, 0.25);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.auth-screen .auth-input::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.auth-screen .auth-input:focus {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.5);
+}
+
+.auth-screen-certify {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.auth-screen .auth-legal-block {
+  margin-top: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.auth-screen-certify-intro {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.auth-screen .auth-legal-row {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 0.9rem;
+  margin-bottom: 0.85rem;
+}
+
+.auth-screen .auth-legal-row:last-child {
+  margin-bottom: 0;
+}
+
+.auth-screen .auth-legal-row input[type='checkbox'] {
+  width: 1.05rem;
+  height: 1.05rem;
+  margin-top: 0.2rem;
+  border-radius: 3px;
+  accent-color: var(--accent);
+}
+
+.auth-screen .auth-legal-link {
+  color: #fff;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-weight: 500;
+}
+
+.auth-screen .auth-legal-link:hover {
+  color: var(--accent-strong);
+}
+
+.auth-screen .error-banner {
+  margin-top: 0.75rem;
+  background: rgba(127, 29, 29, 0.45);
+  border-color: rgba(252, 165, 165, 0.4);
+  color: #fecaca;
+}
+
+.auth-screen .auth-success {
+  color: var(--accent-strong);
+}
+
+.auth-screen .btn-primary.auth-submit {
+  margin-top: 1rem;
+  padding: 0.75rem 1.25rem;
+  width: 100%;
+  font-weight: 600;
+  background: var(--btn-primary-bg);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: var(--btn-primary-fg);
+}
+
+.auth-screen .btn-primary.auth-submit:hover:not(:disabled) {
+  background: #fff;
+  color: var(--btn-primary-hover-fg);
+}
+
+.auth-screen .btn-primary.auth-submit:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.auth-screen .auth-linkish {
+  color: rgba(255, 255, 255, 0.65);
+  margin-top: 1rem;
+  display: block;
+  text-align: center;
+  width: 100%;
+}
+
+.auth-screen .auth-linkish:hover {
+  color: #fff;
+}
+
+.auth-screen-footer-hint {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.auth-screen-footer-hint button {
+  display: inline;
+  padding: 0;
+  margin: 0 0.15rem;
+  border: none;
+  background: none;
+  color: rgba(255, 255, 255, 0.55);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.auth-screen-footer-hint button:hover {
+  color: rgba(255, 255, 255, 0.85);
+}

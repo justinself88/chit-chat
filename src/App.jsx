@@ -1,0 +1,1048 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { io } from 'socket.io-client';
+import { TOPICS } from './topics.js';
+import DebateHistory from './DebateHistory.jsx';
+import { fetchRecentDebates, logDebateSessionEnd, syncUserPresence } from './chitChatFirestore.js';
+import ReportIssue from './ReportIssue.jsx';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import AuthScreen from './AuthScreen.jsx';
+import BrandLogo from './BrandLogo.jsx';
+import HeaderNavMenu from './HeaderNavMenu.jsx';
+import LegalViewer from './legal/LegalViewer.jsx';
+import MissionPage from './MissionPage.jsx';
+import SupportPage from './SupportPage.jsx';
+import { auth, isFirebaseConfigured } from './firebase.js';
+import AudioLevelMeter from './AudioLevelMeter.jsx';
+import DeviceSettings from './DeviceSettings.jsx';
+import { getMediaErrorMessage, getUserMediaWithFallback } from './mediaUtils.js';
+import './App.css';
+
+const FALLBACK_RTC = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+  ],
+};
+
+function connectionLabel(state) {
+  if (!state) return '';
+  const map = {
+    new: 'Starting…',
+    connecting: 'Connecting…',
+    connected: 'Connected',
+    disconnected: 'Disconnected',
+    failed: 'Connection failed',
+    closed: 'Ended',
+  };
+  return map[state] ?? state;
+}
+
+function topicLabel(id) {
+  return TOPICS.find((t) => t.id === id)?.label ?? id;
+}
+
+const LEGAL_OVERLAY_IDS = new Set(['terms', 'privacy', 'community', 'recording']);
+
+export default function App() {
+  const [step, setStep] = useState('welcome');
+  const [matchMode, setMatchMode] = useState(null);
+  const [topicId, setTopicId] = useState(null);
+  const [side, setSide] = useState(null);
+  const [waiting, setWaiting] = useState(false);
+  const [debateInfo, setDebateInfo] = useState(null);
+  const [error, setError] = useState(null);
+  const [micOn, setMicOn] = useState(true);
+  const [camOn, setCamOn] = useState(true);
+  const [connState, setConnState] = useState(null);
+  const [firebaseUserId, setFirebaseUserId] = useState(null);
+  const [firebaseIdToken, setFirebaseIdToken] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [videoDeviceId, setVideoDeviceId] = useState('');
+  const [audioDeviceId, setAudioDeviceId] = useState('');
+  /** Same tracks as localStreamRef — kept in state for `<AudioLevelMeter />`. */
+  const [localStream, setLocalStream] = useState(null);
+  const [historyRows, setHistoryRows] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState(null);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [customRoomCode, setCustomRoomCode] = useState('');
+  const [customStatement, setCustomStatement] = useState('');
+  const [customSearch, setCustomSearch] = useState('');
+  const [customGames, setCustomGames] = useState([]);
+  const [customTab, setCustomTab] = useState('join');
+  const [customJoinMode, setCustomJoinMode] = useState('open');
+  const [copyConfirmed, setCopyConfirmed] = useState(false);
+  const [customHostWaiting, setCustomHostWaiting] = useState(false);
+  /** Full-screen overlay from header menu: legal doc id, mission, or support. */
+  const [headerOverlay, setHeaderOverlay] = useState(null);
+
+  const rtcConfigRef = useRef(FALLBACK_RTC);
+  const socketRef = useRef(null);
+  const pcRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const localVideoRef = useRef(null);
+  const roomIdRef = useRef(null);
+  const pendingSignalsRef = useRef([]);
+  /** Set when a debate session successfully starts (after mic/cam acquired). */
+  const debateSessionRef = useRef(null);
+  const matchModeRef = useRef(null);
+  const sideRef = useRef(null);
+
+  useEffect(() => {
+    matchModeRef.current = matchMode;
+    sideRef.current = side;
+  }, [matchMode, side]);
+
+  const loadHistory = useCallback(async () => {
+    if (!firebaseUserId || !isFirebaseConfigured) {
+      setHistoryError('Firebase is not configured or you are not signed in yet.');
+      return;
+    }
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const rows = await fetchRecentDebates(firebaseUserId);
+      setHistoryRows(rows);
+    } catch (e) {
+      setHistoryError(e?.message ?? 'Could not load history.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [firebaseUserId]);
+
+  const openHistory = () => {
+    setStep('history');
+    loadHistory();
+  };
+
+  const flushDebateLog = useCallback((reason) => {
+    const s = debateSessionRef.current;
+    if (!s) return;
+    logDebateSessionEnd({
+      topicId: s.topicId,
+      yourSide: s.yourSide,
+      roomId: s.roomId,
+      startedAtMs: s.startedAtMs,
+      reason,
+      connectionState: pcRef.current?.connectionState ?? null,
+    });
+    debateSessionRef.current = null;
+  }, []);
+
+  const cleanupMedia = useCallback(() => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((t) => t.stop());
+      localStreamRef.current = null;
+    }
+    if (pcRef.current) {
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+    if (localVideoRef.current) localVideoRef.current.srcObject = null;
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+    roomIdRef.current = null;
+    setConnState(null);
+    setLocalStream(null);
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/rtc-config')
+      .then((r) => r.json())
+      .then((cfg) => {
+        if (cfg?.iceServers?.length) rtcConfigRef.current = cfg;
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!isFirebaseConfigured) {
+      setAuthReady(true);
+      return;
+    }
+    const unsub = onAuthStateChanged(auth, (user) => {
+      setFirebaseUserId(user?.uid ?? null);
+      setFirebaseIdToken(null);
+      if (user) syncUserPresence();
+      if (user) {
+        user
+          .getIdToken()
+          .then((t) => setFirebaseIdToken(t))
+          .catch(() => setFirebaseIdToken(null));
+      }
+      setAuthReady(true);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (firebaseUserId) return;
+    cleanupMedia();
+    setStep('welcome');
+    setMatchMode(null);
+    setTopicId(null);
+    setSide(null);
+    setWaiting(false);
+    setDebateInfo(null);
+    setError(null);
+    setConnState(null);
+  }, [authReady, firebaseUserId, cleanupMedia]);
+
+  useEffect(() => {
+    if (!isFirebaseConfigured || !firebaseUserId || !firebaseIdToken) return;
+
+    const socket = io({
+      path: '/socket.io',
+      transports: ['websocket', 'polling'],
+      auth: { token: firebaseIdToken },
+    });
+    socketRef.current = socket;
+
+    const processSignal = async ({ type, payload }) => {
+      const pc = pcRef.current;
+      const roomId = roomIdRef.current;
+      if (!pc || !roomId) return;
+
+      if (type === 'offer') {
+        await pc.setRemoteDescription(new RTCSessionDescription(payload));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit('signal', { roomId, type: 'answer', payload: answer });
+      } else if (type === 'answer') {
+        await pc.setRemoteDescription(new RTCSessionDescription(payload));
+      } else if (type === 'ice' && payload) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(payload));
+        } catch {
+          /* may arrive slightly early; connection often still succeeds */
+        }
+      }
+    };
+
+    const flushPendingSignals = async () => {
+      const queued = pendingSignalsRef.current.splice(0);
+      for (const sig of queued) {
+        await processSignal(sig);
+      }
+    };
+
+    socket.on('matched', async (payload) => {
+      setWaiting(false);
+      setError(null);
+      setCustomHostWaiting(false);
+      if (pcRef.current) {
+        pcRef.current.close();
+        pcRef.current = null;
+      }
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = null;
+      }
+      roomIdRef.current = payload.roomId;
+      setDebateInfo({
+        roomId: payload.roomId,
+        topicId: payload.topicId ?? (payload.matchMode === 'custom' ? 'custom' : null),
+        yourSide: payload.yourSide,
+        isOfferer: payload.isOfferer,
+        matchMode: payload.matchMode ?? 'quick',
+        roomCode: payload.roomCode ?? null,
+        statement: payload.statement ?? null,
+      });
+      setStep('debate');
+
+      try {
+        let stream = localStreamRef.current;
+        if (!stream) {
+          stream = await getUserMediaWithFallback(videoDeviceId, audioDeviceId);
+          localStreamRef.current = stream;
+          setLocalStream(stream);
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = stream;
+          }
+        }
+
+        debateSessionRef.current = {
+          topicId: payload.topicId ?? (payload.matchMode === 'custom' ? 'custom' : null),
+          yourSide: payload.yourSide,
+          roomId: payload.roomId,
+          startedAtMs: Date.now(),
+        };
+
+        const pc = new RTCPeerConnection(rtcConfigRef.current);
+        pcRef.current = pc;
+        setConnState(pc.connectionState);
+
+        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+        pc.onconnectionstatechange = () => {
+          setConnState(pc.connectionState);
+        };
+
+        pc.ontrack = (ev) => {
+          if (remoteVideoRef.current && ev.streams[0]) {
+            remoteVideoRef.current.srcObject = ev.streams[0];
+          }
+        };
+
+        pc.onicecandidate = (ev) => {
+          if (ev.candidate && roomIdRef.current) {
+            socket.emit('signal', {
+              roomId: roomIdRef.current,
+              type: 'ice',
+              payload: ev.candidate.toJSON(),
+            });
+          }
+        };
+
+        await flushPendingSignals();
+
+        if (payload.isOfferer) {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          socket.emit('signal', {
+            roomId: payload.roomId,
+            type: 'offer',
+            payload: offer,
+          });
+        }
+      } catch (e) {
+        setError(getMediaErrorMessage(e));
+        cleanupMedia();
+        setStep('side');
+      }
+    });
+
+    socket.on('queued', (payload = {}) => {
+      setWaiting(true);
+      if (payload.matchMode === 'custom' && payload.roomCode) {
+        setCustomRoomCode(payload.roomCode);
+      }
+    });
+
+    socket.on('custom-games-updated', (games = []) => {
+      setCustomGames(Array.isArray(games) ? games : []);
+    });
+
+    socket.on('custom-game-created', ({ roomCode, statement }) => {
+      if (roomCode) setCustomRoomCode(roomCode);
+      if (statement) setCustomStatement(statement);
+      setSide('pro');
+      setCustomHostWaiting(true);
+      setError(null);
+      setDebateInfo({
+        roomId: null,
+        topicId: 'custom',
+        yourSide: 'pro',
+        isOfferer: false,
+        matchMode: 'custom',
+        roomCode: roomCode ?? null,
+        statement: statement ?? null,
+      });
+      setStep('debate');
+      if (!localStreamRef.current) {
+        getUserMediaWithFallback(videoDeviceId, audioDeviceId)
+          .then((stream) => {
+            localStreamRef.current = stream;
+            setLocalStream(stream);
+            if (localVideoRef.current) {
+              localVideoRef.current.srcObject = stream;
+            }
+            debateSessionRef.current = {
+              topicId: 'custom',
+              yourSide: 'pro',
+              roomId: roomCode ?? null,
+              startedAtMs: Date.now(),
+            };
+          })
+          .catch((e) => {
+            setError(getMediaErrorMessage(e));
+            cleanupMedia();
+            setStep('custom');
+          });
+      }
+    });
+
+    socket.on('custom-lobby-waiting', ({ roomCode, statement }) => {
+      setCustomHostWaiting(true);
+      setDebateInfo((prev) => ({
+        roomId: null,
+        topicId: 'custom',
+        yourSide: 'pro',
+        isOfferer: false,
+        matchMode: 'custom',
+        roomCode: roomCode ?? prev?.roomCode ?? null,
+        statement: statement ?? prev?.statement ?? null,
+      }));
+      if (pcRef.current) {
+        pcRef.current.close();
+        pcRef.current = null;
+      }
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = null;
+      }
+      setConnState(null);
+      setError('Opponent left. Waiting for next challenger...');
+    });
+
+    socket.on('peer-kicked', () => {
+      flushDebateLog('peer_kicked');
+      setError('You were removed by the lobby creator.');
+      cleanupMedia();
+      setReportOpen(false);
+      setDebateInfo(null);
+      setConnState(null);
+      setWaiting(false);
+      setStep('custom');
+      setMatchMode('custom');
+      setCustomRoomCode('');
+      setCustomHostWaiting(false);
+      setCustomTab('join');
+      setSide(null);
+    });
+
+    socket.on('queue-error', ({ message, code }) => {
+      if (code === 'rate_limited') {
+        setError(message ?? 'Too many attempts. Please wait and try again.');
+      } else if (code === 'already_active') {
+        setError(
+          message ??
+            'You already have an active debate or queue in another tab/window. Go to that tab, click Leave debate or Cancel queue, then try again here.'
+        );
+      } else {
+        setError(message ?? 'Could not join the queue.');
+      }
+      setWaiting(false);
+    });
+
+    socket.on('signal', async ({ type, payload }) => {
+      if (!pcRef.current || !roomIdRef.current) {
+        pendingSignalsRef.current.push({ type, payload });
+        return;
+      }
+      try {
+        await processSignal({ type, payload });
+      } catch {
+        setError('Connection error. Try again.');
+      }
+    });
+
+    socket.on('peer-left', () => {
+      if (matchModeRef.current === 'custom' && sideRef.current === 'pro') {
+        setCustomHostWaiting(true);
+        setDebateInfo((prev) => (prev ? { ...prev, roomId: null } : prev));
+        if (pcRef.current) {
+          pcRef.current.close();
+          pcRef.current = null;
+        }
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = null;
+        }
+        setConnState(null);
+        setError('Opponent left. Waiting for next challenger...');
+        return;
+      }
+      flushDebateLog('peer_left');
+      setError('Your opponent left the debate.');
+      cleanupMedia();
+      setReportOpen(false);
+      setDebateInfo(null);
+      setConnState(null);
+      setStep('welcome');
+      setMatchMode(null);
+      setTopicId(null);
+      setSide(null);
+    });
+
+    return () => {
+      socket.emit('leave-queue');
+      cleanupMedia();
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [cleanupMedia, flushDebateLog, firebaseUserId, firebaseIdToken]);
+
+  const pickTopic = (id) => {
+    setTopicId(id);
+    setStep('side');
+  };
+
+  const joinQueue = (s) => {
+    setSide(s);
+    setError(null);
+    const sock = socketRef.current;
+    if (!sock || !topicId) return;
+    sock.emit('join-queue', { topicId, side: s });
+  };
+
+  const cancelWaiting = () => {
+    socketRef.current?.emit('leave-queue');
+    setWaiting(false);
+    setSide(null);
+    setStep(matchMode === 'custom' ? 'custom' : 'topic');
+  };
+
+  const startQuickMatch = () => {
+    setError(null);
+    setMatchMode('quick');
+    setTopicId(null);
+    setSide(null);
+    setStep('topic');
+  };
+
+  const startCustomMatch = () => {
+    setError(null);
+    setMatchMode('custom');
+    setTopicId(null);
+    setSide(null);
+    setCustomRoomCode('');
+    setCustomStatement('');
+    setCustomSearch('');
+    setCustomTab('join');
+    setCustomJoinMode('open');
+    setCustomHostWaiting(false);
+    setStep('custom');
+  };
+
+  const createCustomGame = () => {
+    const sock = socketRef.current;
+    if (!sock) return;
+    const statement = customStatement.trim();
+    if (statement.length < 8) {
+      setError('Add a statement with at least 8 characters.');
+      return;
+    }
+    setError(null);
+    sock.emit('create-custom-game', { statement, joinMode: customJoinMode });
+  };
+
+  const joinCustomGame = (roomCode) => {
+    const sock = socketRef.current;
+    if (!sock) return;
+    setCustomRoomCode(roomCode);
+    setError(null);
+    setSide('con');
+    sock.emit('join-custom-room', { side: 'con', roomCode });
+  };
+
+  const joinByCode = () => {
+    const normalizedRoomCode = customRoomCode.trim().toUpperCase();
+    if (!normalizedRoomCode) {
+      setError('Enter a room code.');
+      return;
+    }
+    joinCustomGame(normalizedRoomCode);
+  };
+
+  const copyRoomCode = async (codeToCopy = customRoomCode) => {
+    if (!codeToCopy || !navigator?.clipboard) return;
+    try {
+      await navigator.clipboard.writeText(codeToCopy);
+      setCopyConfirmed(true);
+      window.setTimeout(() => setCopyConfirmed(false), 1400);
+    } catch {
+      /* ignore clipboard errors */
+    }
+    setError(null);
+  };
+
+  const kickOpponent = () => {
+    if (!debateInfo?.roomId) return;
+    const ok = window.confirm('Kick this opponent from your lobby? They can rejoin later.');
+    if (!ok) return;
+    socketRef.current?.emit('kick-peer', { roomId: debateInfo.roomId });
+  };
+
+  const handleSignOut = async () => {
+    cleanupMedia();
+    setDebateInfo(null);
+    setStep('welcome');
+    setMatchMode(null);
+    setCustomHostWaiting(false);
+    setTopicId(null);
+    setSide(null);
+    setError(null);
+    try {
+      if (auth) await signOut(auth);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const endDebate = () => {
+    flushDebateLog('leave');
+    socketRef.current?.emit('leave-debate');
+    cleanupMedia();
+    setReportOpen(false);
+    setDebateInfo(null);
+    setStep('welcome');
+    setMatchMode(null);
+    setCustomHostWaiting(false);
+    setTopicId(null);
+    setSide(null);
+    setError(null);
+  };
+
+  useEffect(() => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    stream.getAudioTracks().forEach((t) => {
+      t.enabled = micOn;
+    });
+  }, [micOn]);
+
+  useEffect(() => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    stream.getVideoTracks().forEach((t) => {
+      t.enabled = camOn;
+    });
+  }, [camOn]);
+
+  const showAuthScreen = authReady && isFirebaseConfigured && !firebaseUserId;
+  const showMainApp = authReady && isFirebaseConfigured && !!firebaseUserId;
+
+  return (
+    <>
+      {showMainApp && (
+        <div className="app-top-bar">
+          <header className="app-header">
+            <div className="app-header-row">
+              <div className="app-header-main">
+                <BrandLogo className="brand-logo--header" />
+                <p className="app-tagline">
+                  Pick a topic, take a side, and get matched with someone who disagrees for a
+                  real-time video conversation.
+                </p>
+              </div>
+              <div className="header-actions">
+                <HeaderNavMenu
+                  onPickLegal={(id) => setHeaderOverlay(id)}
+                  onPickMission={() => setHeaderOverlay('mission')}
+                  onPickSupport={() => setHeaderOverlay('support')}
+                />
+                <button type="button" className="btn btn-ghost header-sign-out" onClick={handleSignOut}>
+                  Sign out
+                </button>
+              </div>
+            </div>
+          </header>
+        </div>
+      )}
+
+      <div
+        className={['app', showAuthScreen ? 'app--auth-only' : '', showMainApp ? 'app--with-global-header' : '']
+          .filter(Boolean)
+          .join(' ')}
+      >
+      {!authReady && (
+        <div className="panel auth-initializing">
+          <p className="auth-initializing-text">Loading…</p>
+        </div>
+      )}
+
+      {authReady && !isFirebaseConfigured && (
+        <div className="panel">
+          <h2 className="auth-title">Firebase setup required</h2>
+          <p className="auth-lead">
+            Add your <code>VITE_FIREBASE_*</code> keys to <code>.env</code> (see{' '}
+            <code>.env.example</code>), then restart the dev server.
+          </p>
+        </div>
+      )}
+
+      {authReady && isFirebaseConfigured && !firebaseUserId && <AuthScreen />}
+
+      {showMainApp && (
+        <>
+      {step !== 'debate' && step !== 'history' && (
+        <details className="device-details" open>
+          <summary className="device-details-summary">Camera &amp; microphone</summary>
+          <div className="panel device-details-panel">
+            <DeviceSettings
+              videoDeviceId={videoDeviceId}
+              audioDeviceId={audioDeviceId}
+              onVideoDeviceChange={setVideoDeviceId}
+              onAudioDeviceChange={setAudioDeviceId}
+            />
+          </div>
+        </details>
+      )}
+
+      {step === 'welcome' && (
+        <div className="panel welcome-actions">
+          <p style={{ marginTop: 0, color: 'var(--muted)' }}>
+            You’re signed in. Choose a topic, then set up your camera and microphone in the panel
+            above before you start.
+          </p>
+          <div className="welcome-actions-row">
+            <button type="button" className="btn btn-primary" onClick={startQuickMatch}>
+              Quick match
+            </button>
+            <button type="button" className="btn" onClick={startCustomMatch}>
+              Custom room
+            </button>
+            <button type="button" className="btn" onClick={openHistory}>
+              Past sessions
+            </button>
+          </div>
+          <p className="mode-help-text">
+            Quick match pairs you with anyone on the opposite side. Custom room lets you share a
+            room code and debate someone specific.
+          </p>
+        </div>
+      )}
+
+      {step === 'custom' && (
+        <div className="panel custom-browser">
+          <h2>Custom debates</h2>
+          <p style={{ color: 'var(--muted)', marginTop: '-0.5rem' }}>
+            Create a statement to start a live debate, or join a statement you disagree with.
+          </p>
+          <div className="custom-browser-tabs" role="tablist" aria-label="Custom debate modes">
+            <button
+              type="button"
+              className={`custom-tab ${customTab === 'join' ? 'custom-tab--active' : ''}`}
+              role="tab"
+              aria-selected={customTab === 'join'}
+              onClick={() => setCustomTab('join')}
+            >
+              Join servers
+            </button>
+            <button
+              type="button"
+              className={`custom-tab ${customTab === 'create' ? 'custom-tab--active' : ''}`}
+              role="tab"
+              aria-selected={customTab === 'create'}
+              onClick={() => setCustomTab('create')}
+            >
+              Create server
+            </button>
+          </div>
+
+          {customTab === 'create' && (
+            <div className="custom-tab-panel">
+              <h3 className="custom-subtitle">Create server</h3>
+              <div className="custom-toolbar">
+                <label className="custom-visibility-label" htmlFor="customJoinMode">
+                  Join access
+                </label>
+                <select
+                  id="customJoinMode"
+                  className="auth-input custom-visibility-select"
+                  value={customJoinMode}
+                  onChange={(e) => setCustomJoinMode(e.target.value === 'code' ? 'code' : 'open')}
+                >
+                  <option value="open">Open lobby (shows in Join servers list)</option>
+                  <option value="code">Code-only (hidden from list)</option>
+                </select>
+              </div>
+              <div className="custom-toolbar">
+                <input
+                  id="statementInput"
+                  type="text"
+                  className="auth-input custom-search"
+                  placeholder="Your statement (example: Vegetables are bad for humans)"
+                  value={customStatement}
+                  onChange={(e) => setCustomStatement(e.target.value)}
+                  maxLength={240}
+                />
+                <button type="button" className="btn btn-primary custom-create-btn" onClick={createCustomGame}>
+                  Publish statement
+                </button>
+              </div>
+            </div>
+          )}
+
+          {customTab === 'join' && (
+            <div className="custom-tab-panel">
+              <h3 className="custom-subtitle">Join servers</h3>
+              <div className="custom-toolbar">
+                <input
+                  id="roomCodeInput"
+                  type="text"
+                  className="auth-input custom-room-code"
+                  placeholder="Join by room code"
+                  value={customRoomCode}
+                  onChange={(e) => setCustomRoomCode(e.target.value.toUpperCase())}
+                  maxLength={24}
+                />
+                <button type="button" className="btn custom-create-btn" onClick={joinByCode}>
+                  Join by code
+                </button>
+              </div>
+              <div className="custom-toolbar">
+                <input
+                  id="customSearchInput"
+                  type="text"
+                  className="auth-input custom-search"
+                  placeholder="Filter live statements"
+                  value={customSearch}
+                  onChange={(e) => setCustomSearch(e.target.value)}
+                  maxLength={120}
+                />
+              </div>
+              <div className="custom-table-wrap" role="region" aria-label="Custom room list">
+                <table className="custom-table">
+                  <thead>
+                    <tr>
+                      <th>Room</th>
+                      <th>Statement</th>
+                      <th>Status</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {customGames
+                      .filter((g) => {
+                        const query = customSearch.trim().toLowerCase();
+                        if (!query) return true;
+                        return (
+                          g.roomCode?.toLowerCase().includes(query) ||
+                          g.statement?.toLowerCase().includes(query)
+                        );
+                      })
+                      .map((g) => (
+                        <tr key={g.roomCode}>
+                          <td>{g.roomCode}</td>
+                          <td>{g.statement}</td>
+                          <td>Waiting</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn custom-join-btn"
+                              onClick={() => joinCustomGame(g.roomCode)}
+                            >
+                              Join & disagree
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    {customGames.filter((g) => {
+                      const query = customSearch.trim().toLowerCase();
+                      if (!query) return true;
+                      return (
+                        g.roomCode?.toLowerCase().includes(query) ||
+                        g.statement?.toLowerCase().includes(query)
+                      );
+                    }).length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="custom-empty-row">
+                          No open servers right now. Create one or use Join by code.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {!!customRoomCode && side === 'pro' && (
+            <p className="mode-help-text">
+              Current room code: <strong>{customRoomCode}</strong>{' '}
+              <button type="button" className="auth-legal-link copy-code-btn" onClick={copyRoomCode}>
+                {copyConfirmed ? '✓ Copied' : 'Copy'}
+              </button>
+            </p>
+          )}
+          {waiting && (
+            <div className="waiting" style={{ marginTop: '1.5rem' }}>
+              <div className="spinner" aria-hidden />
+              <p>
+                {side === 'pro'
+                  ? 'Your custom game is live. Waiting for someone who disagrees to join…'
+                  : 'Joining debate…'}
+              </p>
+              <button type="button" className="back-btn" onClick={cancelWaiting}>
+                Cancel
+              </button>
+            </div>
+          )}
+          {error && step === 'custom' && <div className="error-banner">{error}</div>}
+          {!waiting && (
+            <button type="button" className="back-btn" onClick={() => setStep('welcome')}>
+              Back
+            </button>
+          )}
+        </div>
+      )}
+
+      {step === 'history' && (
+        <DebateHistory
+          rows={historyRows}
+          loading={historyLoading}
+          error={historyError}
+          onBack={() => setStep('welcome')}
+          onRefresh={loadHistory}
+        />
+      )}
+
+      {step === 'topic' && (
+        <div className="panel">
+          <h2>Select a topic</h2>
+          <div className="topic-grid">
+            {TOPICS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className="topic-card"
+                onClick={() => pickTopic(t.id)}
+              >
+                <strong>{t.label}</strong>
+                <span>{t.blurb}</span>
+              </button>
+            ))}
+          </div>
+          <button type="button" className="back-btn" onClick={() => setStep('welcome')}>
+            Back
+          </button>
+        </div>
+      )}
+
+      {step === 'side' && topicId && (
+        <div className="panel">
+          <h2>{topicLabel(topicId)}</h2>
+          <p style={{ color: 'var(--muted)', marginTop: '-0.5rem' }}>
+            Which side are you arguing for in this match?
+          </p>
+          <div className="side-row">
+            <button type="button" className="side-btn pro" onClick={() => joinQueue('pro')}>
+              Pro / For
+            </button>
+            <button type="button" className="side-btn con" onClick={() => joinQueue('con')}>
+              Con / Against
+            </button>
+          </div>
+          {waiting && (
+            <div className="waiting" style={{ marginTop: '1.5rem' }}>
+              <div className="spinner" aria-hidden />
+              <p>Looking for someone on the other side…</p>
+              <button type="button" className="back-btn" onClick={cancelWaiting}>
+                Cancel
+              </button>
+            </div>
+          )}
+          {error && step === 'side' && <div className="error-banner">{error}</div>}
+          {!waiting && (
+            <button type="button" className="back-btn" onClick={() => setStep('topic')}>
+              Back to topics
+            </button>
+          )}
+        </div>
+      )}
+
+      {step === 'debate' && debateInfo && (
+        <div className="panel">
+          <div className="debate-header">
+            <div className="debate-meta">
+              {debateInfo.matchMode === 'custom' ? (
+                <>
+                  Statement: <strong>{debateInfo.statement ?? 'Custom debate'}</strong>
+                  {' · '}
+                  You:{' '}
+                  <strong>{debateInfo.yourSide === 'pro' ? 'Creator' : 'Disagreeing side'}</strong>
+                </>
+              ) : (
+                <>
+                  Topic: <strong>{topicLabel(debateInfo.topicId)}</strong>
+                  {' · '}
+                  You:{' '}
+                  <strong>{debateInfo.yourSide === 'pro' ? 'Pro' : 'Con'}</strong>
+                </>
+              )}
+              {debateInfo.matchMode === 'custom' && debateInfo.roomCode ? (
+                <>
+                  {' · '}
+                  Room: <strong>{debateInfo.roomCode}</strong>{' '}
+                  <button
+                    type="button"
+                    className="auth-legal-link copy-code-btn"
+                    onClick={() => copyRoomCode(debateInfo.roomCode)}
+                  >
+                    {copyConfirmed ? '✓ Copied' : 'Copy'}
+                  </button>
+                </>
+              ) : null}
+            </div>
+            {connState && (
+              <span
+                className={`conn-pill conn-${connState}`}
+                title="WebRTC connection state"
+              >
+                {connectionLabel(connState)}
+              </span>
+            )}
+          </div>
+          <div className="video-grid">
+            <div className="video-wrap">
+              <video ref={localVideoRef} autoPlay playsInline muted />
+              <div className="video-local-overlay">
+                <AudioLevelMeter stream={localStream} compact muted={!micOn} />
+              </div>
+              <span className="video-label">You</span>
+            </div>
+            <div className="video-wrap">
+              <video ref={remoteVideoRef} autoPlay playsInline />
+              <span className="video-label">Opponent</span>
+            </div>
+          </div>
+          {error && <div className="error-banner">{error}</div>}
+          {connState === 'failed' && !error && (
+            <p className="rtc-hint">
+              If this keeps happening, add a TURN server via{' '}
+              <code>ICE_SERVERS_JSON</code> on the server (see <code>.env.example</code>).
+            </p>
+          )}
+          {customHostWaiting && debateInfo.matchMode === 'custom' && (
+            <p className="mode-help-text">Lobby is open. Waiting for someone to join your debate…</p>
+          )}
+          {debateInfo.matchMode === 'custom' && (
+            <p className="lobby-status">
+              Lobby:{' '}
+              <span className={`lobby-status-pill ${customHostWaiting ? 'waiting' : 'active'}`}>
+                {customHostWaiting ? 'Waiting' : 'In debate'}
+              </span>
+            </p>
+          )}
+          <div className="debate-actions">
+            <button type="button" className="btn" onClick={() => setMicOn((m) => !m)}>
+              {micOn ? 'Mute mic' : 'Unmute mic'}
+            </button>
+            <button type="button" className="btn" onClick={() => setCamOn((c) => !c)}>
+              {camOn ? 'Camera off' : 'Camera on'}
+            </button>
+            {debateInfo.matchMode === 'custom' &&
+              debateInfo.yourSide === 'pro' &&
+              !customHostWaiting &&
+              !!debateInfo.roomId && (
+                <button type="button" className="btn" onClick={kickOpponent}>
+                  Kick opponent
+                </button>
+              )}
+            <button type="button" className="btn" onClick={() => setReportOpen(true)}>
+              Report issue
+            </button>
+            <button type="button" className="btn btn-danger" onClick={endDebate}>
+              Leave debate
+            </button>
+          </div>
+          <ReportIssue
+            open={reportOpen}
+            onClose={() => setReportOpen(false)}
+            topicId={debateInfo.topicId}
+            roomId={debateInfo.roomId}
+            yourSide={debateInfo.yourSide}
+          />
+        </div>
+      )}
+
+          {LEGAL_OVERLAY_IDS.has(headerOverlay) && (
+            <LegalViewer documentId={headerOverlay} onBack={() => setHeaderOverlay(null)} />
+          )}
+          {headerOverlay === 'mission' && <MissionPage onBack={() => setHeaderOverlay(null)} />}
+          {headerOverlay === 'support' && <SupportPage onBack={() => setHeaderOverlay(null)} />}
+        </>
+      )}
+      </div>
+    </>
+  );
+}
