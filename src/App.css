@@ -642,10 +642,16 @@
   gap: 1rem;
 }
 
+/* Keeps chat from dictating overall debate panel height (videos stay the visual anchor). */
+.debate-main--with-chat {
+  container-type: inline-size;
+  container-name: debate-main;
+}
+
 @media (min-width: 900px) {
   .debate-main--with-chat {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 300px);
     align-items: start;
     gap: 1rem;
   }
@@ -656,9 +662,10 @@
 
   .debate-main--with-chat .debate-chat {
     grid-column: 2;
-    position: sticky;
-    top: 0.5rem;
-    max-height: min(70vh, 520px);
+    /* Match ~one 4:3 video tile height (half of column 1 minus gap), not a tall viewport column */
+    max-height: clamp(200px, calc((100cqi - 320px) / 2 * 0.75), 340px);
+    min-height: 0;
+    overflow: hidden;
   }
 }
 
@@ -682,6 +689,15 @@
   border-radius: 12px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.04);
+  min-height: 0;
+}
+
+/* Stacked layout (narrow): don’t let chat tower and push controls down */
+@media (max-width: 899px) {
+  .debate-main--with-chat .debate-chat {
+    max-height: min(42vh, 320px);
+    overflow: hidden;
+  }
 }
 
 .debate-chat-title {
@@ -697,9 +713,8 @@
 }
 
 .debate-chat-messages {
-  flex: 1;
-  min-height: 120px;
-  max-height: 280px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding: 0.5rem;
   border-radius: 8px;
@@ -768,8 +783,9 @@
   color: var(--text);
   font-family: inherit;
   font-size: 0.9rem;
-  resize: vertical;
-  min-height: 3rem;
+  resize: none;
+  min-height: 2.75rem;
+  max-height: 5rem;
 }
 
 .debate-chat-input:focus {
