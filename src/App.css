@@ -652,20 +652,22 @@
   .debate-main--with-chat {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(260px, 300px);
-    align-items: start;
+    /* Stretch chat to same row height as the video grid (fills space below short fixed caps) */
+    align-items: stretch;
     gap: 1rem;
   }
 
   .debate-main--with-chat .video-grid {
     grid-column: 1;
+    min-width: 0;
   }
 
   .debate-main--with-chat .debate-chat {
     grid-column: 2;
-    /* Fixed height so flex children share space; don’t clip Send (no overflow:hidden on this box) */
-    height: clamp(240px, calc((100cqi - 320px) / 2 * 0.75), 430px);
-    max-height: clamp(240px, calc((100cqi - 320px) / 2 * 0.75), 430px);
+    align-self: stretch;
+    height: 100%;
     min-height: 0;
+    max-height: none;
     box-sizing: border-box;
     overflow: visible;
   }
@@ -695,11 +697,11 @@
   box-sizing: border-box;
 }
 
-/* Stacked layout (narrow): don’t let chat tower and push controls down */
+/* Stacked layout (narrow): cap height; desktop uses stretch to match videos */
 @media (max-width: 899px) {
   .debate-main--with-chat .debate-chat {
-    height: min(46vh, 400px);
-    max-height: min(46vh, 400px);
+    height: min(52vh, 480px);
+    max-height: min(52vh, 480px);
     overflow: visible;
   }
 }
@@ -725,7 +727,7 @@
   flex-direction: column;
   gap: 0.5rem;
   flex: 1 1 0;
-  min-height: 7rem;
+  min-height: 9rem;
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
