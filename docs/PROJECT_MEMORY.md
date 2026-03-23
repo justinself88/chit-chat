@@ -213,6 +213,7 @@ Copy `.env.example` to `.env` locally if needed (`.env` is gitignored). For Fire
 - **Planned next:** Run a production smoke-test matrix (Quick match + Custom open + Custom code-only + multi-tab safeguard recovery) and review metrics/cleanup logs for the first 24h; then tune `CUSTOM_LOBBY_TTL_MS` if needed and finish any remaining custom-mode copy consistency.
 - **Railway variables:** New/changed vars remain staged until **Apply changes** is clicked in the Railway UI.
 - **Production quick-match reliability:** Socket connection now tolerates temporary ID token unavailability in optional auth mode and shows clearer connection errors instead of a silent side-button no-op.
+- **Socket lifecycle:** Socket.IO `useEffect` should **not** depend on `firebaseIdToken` (token refresh would reconnect and race matchmaking). Quick Match sets **waiting optimistically** on `join-queue` / `join-custom-room` emit; server still confirms with `queued` or `queue-error`.
 - **Production transport hardening:** Express SPA fallback now skips `/socket.io` routes to avoid polling transport interception in production builds.
 - **Queue UI acknowledgement rule:** Waiting spinner should only render after server `queued` ack (not immediately on click).
 - **Firebase:** If keys are missing, the app still runs; only the dev hint appears (in development). If **Email/Password** is not enabled in Console, sign-in or sign-up errors surface on **`AuthScreen`** (`auth/operation-not-allowed`).
