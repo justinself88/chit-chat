@@ -1,7 +1,7 @@
 rules_version = '2';
 
 // Chitchat — requires a signed-in Firebase Auth user (email/password; no Anonymous).
-// users/{email} — document id = lowercase email. Subcollections: debates, text_chat (mirror of in-debate chat).
+// users/{email} — document id = lowercase email. Subcollections: debates (+ chat_messages from server), legacy text_chat.
 // Paste into Firebase Console → Firestore → Rules, or: firebase deploy --only firestore:rules
 
 service cloud.firestore {
@@ -42,9 +42,15 @@ service cloud.firestore {
         allow read: if isOwnUserEmailDoc(userKey);
 
         allow update, delete: if false;
+
+        // In-debate lines (Admin SDK only). Same path: users/{email}/debates/{roomId}/chat_messages
+        match /chat_messages/{messageId} {
+          allow read: if isOwnUserEmailDoc(userKey);
+          allow write: if false;
+        }
       }
 
-      // In-debate text lines (written only by server / Admin SDK). User may read own thread in Console + app.
+      // Legacy mirror (older deploys). Server now writes under debates/{roomId}/chat_messages.
       match /text_chat/{messageId} {
         allow read: if isOwnUserEmailDoc(userKey);
         allow write: if false;
@@ -77,6 +83,7 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Legacy top-level sessions (old server). Deny clients; new data lives under users/.../debates.
     match /match_sessions/{sessionId} {
       allow read, write: if false;
     }

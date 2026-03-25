@@ -86,15 +86,38 @@ export function attachModerationRoutes(app, { isAdminReady }) {
     const msgLimit = parseLimit(req.query.chatLimit, 200, 2000);
     try {
       const db = admin.firestore();
-      const sessionRef = db.collection('match_sessions').doc(roomId);
-      const sessionSnap = await sessionRef.get();
-      const session = sessionSnap.exists ? { id: sessionSnap.id, ...sessionSnap.data() } : null;
-      const chatSnap = await sessionRef
-        .collection('chat_messages')
-        .orderBy('sentAtMs', 'asc')
-        .limit(msgLimit)
+      const debateSnap = await db
+        .collectionGroup('debates')
+        .where('sessionKind', '==', 'match')
+        .where('roomId', '==', roomId)
+        .limit(2)
         .get();
-      const chat_messages = chatSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+      let session = null;
+      let chat_messages = [];
+      if (!debateSnap.empty) {
+        const d0 = debateSnap.docs[0];
+        session = { id: d0.id, ...d0.data() };
+        const chatSnap = await d0.ref
+          .collection('chat_messages')
+          .orderBy('sentAtMs', 'asc')
+          .limit(msgLimit)
+          .get();
+        chat_messages = chatSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      } else {
+        // Legacy: top-level match_sessions (pre user-nested model)
+        const sessionRef = db.collection('match_sessions').doc(roomId);
+        const sessionSnap = await sessionRef.get();
+        if (sessionSnap.exists) {
+          session = { id: sessionSnap.id, ...sessionSnap.data() };
+          const chatSnap = await sessionRef
+            .collection('chat_messages')
+            .orderBy('sentAtMs', 'asc')
+            .limit(msgLimit)
+            .get();
+          chat_messages = chatSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        }
+      }
       res.json({ roomId, session, chat_messages });
     } catch (e) {
       console.warn('[mod] match', e?.message ?? e);
@@ -157,19 +180,50 @@ export function attachModerationRoutes(app, { isAdminReady }) {
     const lim = parseLimit(req.query.limit, 40, 100);
     try {
       const db = admin.firestore();
+      let userEmail = null;
+      try {
+        const rec = await admin.auth().getUser(uid);
+        userEmail = rec.email?.trim().toLowerCase() || null;
+      } catch {
+        /* invalid uid */
+      }
+
+      const sessions = [];
+      if (userEmail) {
+        const snap = await db
+          .collection('users')
+          .doc(userEmail)
+          .collection('debates')
+          .where('sessionKind', '==', 'match')
+          .limit(100)
+          .get();
+        for (const d of snap.docs) {
+          sessions.push({ id: d.id, ...d.data() });
+        }
+      }
+
+      const byId = new Map(sessions.map((s) => [s.id, s]));
       const [proSnap, conSnap] = await Promise.all([
         db.collection('match_sessions').where('proUid', '==', uid).limit(lim).get(),
         db.collection('match_sessions').where('conUid', '==', uid).limit(lim).get(),
       ]);
-      const map = new Map();
-      for (const d of proSnap.docs) map.set(d.id, { id: d.id, ...d.data() });
-      for (const d of conSnap.docs) map.set(d.id, { id: d.id, ...d.data() });
-      const sessions = [...map.values()].sort((a, b) => {
-        const ta = a.startedAt?.toMillis?.() ?? a.startedAt ?? 0;
-        const tb = b.startedAt?.toMillis?.() ?? b.startedAt ?? 0;
+      for (const d of [...proSnap.docs, ...conSnap.docs]) {
+        if (!byId.has(d.id)) {
+          byId.set(d.id, { id: d.id, ...d.data(), _legacyPath: 'match_sessions' });
+        }
+      }
+      const merged = [...byId.values()].sort((a, b) => {
+        const ta = a.startedAt?.toMillis?.() ?? 0;
+        const tb = b.startedAt?.toMillis?.() ?? 0;
         return tb - ta;
       });
-      res.json({ uid, count: sessions.length, match_sessions: sessions });
+      const sliced = merged.slice(0, lim);
+      res.json({
+        uid,
+        userEmail,
+        count: sliced.length,
+        match_sessions: sliced,
+      });
     } catch (e) {
       console.warn('[mod] user sessions', e?.message ?? e);
       res.status(500).json({ error: e?.message ?? 'Query failed.' });

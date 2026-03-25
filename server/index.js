@@ -383,7 +383,21 @@ io.on('connection', (socket) => {
 
   socket.emit('custom-games-updated', listCustomGames());
 
-  socket.on('join-queue', ({ topicId, side }) => {
+  const getRoomProConUids = (roomId) => {
+    const room = io.sockets.adapter.rooms.get(roomId);
+    if (!room) return { proUid: null, conUid: null };
+    let proUid = null;
+    let conUid = null;
+    for (const sid of room) {
+      const s = io.sockets.sockets.get(sid);
+      if (!s?.data) continue;
+      if (s.data.side === 'pro') proUid = s.data.uid ?? null;
+      if (s.data.side === 'con') conUid = s.data.uid ?? null;
+    }
+    return { proUid, conUid };
+  };
+
+  socket.on('join-queue', async ({ topicId, side }) => {
     metrics.quickJoinAttempts += 1;
     if (hasConcurrentSessionForUid()) {
       metrics.queueErrors += 1;
@@ -440,7 +454,7 @@ io.on('connection', (socket) => {
         socket.data.side === 'pro' ? socket.data.uid ?? null : peerSocket.data.uid ?? null;
       const conUidQuick =
         socket.data.side === 'con' ? socket.data.uid ?? null : peerSocket.data.uid ?? null;
-      persistMatchSession(firebaseAdminReady, {
+      await persistMatchSession(firebaseAdminReady, {
         roomId,
         proUid: proUidQuick,
         conUid: conUidQuick,
@@ -541,7 +555,7 @@ io.on('connection', (socket) => {
     emitCustomGamesUpdate();
   });
 
-  socket.on('join-custom-room', ({ side, roomCode }) => {
+  socket.on('join-custom-room', async ({ side, roomCode }) => {
     metrics.customJoinAttempts += 1;
     if (hasConcurrentSessionForUid()) {
       metrics.queueErrors += 1;
@@ -614,7 +628,7 @@ io.on('connection', (socket) => {
         socket.data.side === 'pro' ? socket.data.uid ?? null : peerSocket.data.uid ?? null;
       const conUidCustom =
         socket.data.side === 'con' ? socket.data.uid ?? null : peerSocket.data.uid ?? null;
-      persistMatchSession(firebaseAdminReady, {
+      await persistMatchSession(firebaseAdminReady, {
         roomId,
         proUid: proUidCustom,
         conUid: conUidCustom,
@@ -755,7 +769,7 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('signal', { type, payload, from: socket.id });
   });
 
-  socket.on('debate-chat', ({ roomId, text }) => {
+  socket.on('debate-chat', async ({ roomId, text }) => {
     if (!roomId || roomId !== socket.data.roomId) return;
     const raw = String(text ?? '');
     const trimmed = raw.trim();
@@ -780,12 +794,15 @@ io.on('connection', (socket) => {
       });
       return;
     }
-    persistChatMessage(firebaseAdminReady, {
+    const { proUid, conUid } = getRoomProConUids(roomId);
+    await persistChatMessage(firebaseAdminReady, {
       roomId,
       authorUid: socket.data.uid ?? null,
       authorSocketId: socket.id,
       text: trimmed,
       sentAtMs: now,
+      proUid,
+      conUid,
     });
     io.to(roomId).emit('debate-chat', {
       text: trimmed,
