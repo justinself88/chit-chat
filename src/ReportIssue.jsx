@@ -7,7 +7,15 @@ const CATEGORIES = [
   { id: 'other', label: 'Other' },
 ];
 
-export default function ReportIssue({ open, onClose, topicId, roomId, yourSide }) {
+export default function ReportIssue({
+  open,
+  onClose,
+  topicId,
+  roomId,
+  yourSide,
+  peerUid,
+  matchMode,
+}) {
   const [category, setCategory] = useState('other');
   const [details, setDetails] = useState('');
   const [busy, setBusy] = useState(false);
@@ -40,6 +48,8 @@ export default function ReportIssue({ open, onClose, topicId, roomId, yourSide }
         yourSide,
         category,
         details,
+        peerUid: peerUid || null,
+        matchMode: matchMode || null,
       });
       setDone(true);
     } catch (err) {

@@ -6,7 +6,7 @@
 |--------|--------|
 | **Site name** | **Chit Chat** |
 | **Project name (npm)** | `chit-chat` (workspace folder: `Debate Website`) |
-| **Last updated** | 2026-03-24 (in-debate text chat) |
+| **Last updated** | 2026-03-23 (operator moderation API + moderation_actions) |
 | **Database / BaaS** | **Firebase** — **Email/password Auth** + Firestore (`src/firebase.js`, `AuthScreen.jsx`) |
 
 ---
@@ -26,19 +26,37 @@
 - **WebRTC:** `getUserMedia`, `RTCPeerConnection`, STUN by default; client loads ICE config from **`GET /api/rtc-config`** (optional TURN via `ICE_SERVERS_JSON` on server). **Device picker:** collapsible **Camera & microphone** panel (before a debate) requests permission, lists inputs, preview, and passes `deviceId` constraints into the live call (`DeviceSettings.jsx`, `mediaUtils.js`).
 - **Signaling race handling:** Client buffers Socket.IO `signal` events until `RTCPeerConnection` exists, then flushes (answerer can receive offer before PC is ready).
 - **Production path:** `npm run build` produces `dist/`; `npm start` runs `server/index.js`, which serves static files + SPA fallback when `dist` exists.
-- **Firebase (client):** `onAuthStateChanged` drives session; **`AuthScreen`** is email/password only (no anonymous). **`src/chitChatFirestore.js`** — **`syncUserPresence()`**, **`logDebateSessionEnd()`**; **`fetchRecentDebates`** for Past sessions. Deploy **`firestore.rules`**; enable **Email/Password** in Firebase Console (optionally **disable Anonymous**).
+- **Firebase (client):** `onIdTokenChanged` drives session (uid + token lifecycle); **`AuthScreen`** is email/password only (no anonymous). **`src/chitChatFirestore.js`** — **`syncUserPresence()`**, **`logDebateSessionEnd()`**; **`fetchRecentDebates`** for Past sessions. Deploy **`firestore.rules`**; enable **Email/Password** in Firebase Console (optionally **disable Anonymous**).
 - **Deploy:** `Dockerfile` + `.dockerignore`, **`docs/DEPLOY.md`** (env vars, `VITE_*` at build time).
-- **Past sessions UI:** Welcome → **Past sessions** loads **`debates`** for the current signed-in user (`fetchRecentDebates`, `DebateHistory.jsx`).
+- **Past sessions UI:** Welcome → **Past sessions** loads **`users/{email}/debates`** (and merges legacy top-level **`debates`**) via **`fetchRecentDebates`**, **`DebateHistory.jsx`**.
 - **In-app reports:** During a debate, **Report issue** opens **`ReportIssue.jsx`** (category + details). **`submitReport`** writes Firestore **`reports`** (`reporterUid`, `topicId`, `roomId`, `yourSide`, `category`, `details`, `createdAt`). Rules: authenticated create with matching uid; read own reports only. **Client cooldown:** after a successful submit, **`localStorage`** **`chitchat:lastReportAt`** blocks another report for **90 seconds** (see **`chitChatFirestore.js`**). Modal closes on leave debate / peer disconnect.
 - **Legal & onboarding:** Full-screen **`LegalViewer`** for **Terms of Service**, **Privacy Policy**, **Community Guidelines**, and **Recording & Streaming Consent Agreement** (`src/legal/*.jsx`). **Create account** requires **18+** plus acceptance of all four (single combined policy line with links). **`VITE_CONTACT_EMAIL`** in `.env` drives Privacy + Recording contact lines (`src/legal/contactEmail.js`). Favicon: **`public/chitchat-logo.png`**.
 - **Branding / UI theme:** **`BrandLogo.jsx`** + Chitchat logo asset. **Global theme** in **`index.css`** (design tokens + page background); signed-in UI matches auth (**sky blue** palette as of last update). **`AuthScreen.css`** styles the auth card; **`App.app--auth-only`** full-bleeds auth when not signed in.
 - **Signed-in header:** Full-width **`app-top-bar`** is a **sibling** of **`.app`** (not inside the max-width column) so the logo/tagline center on the viewport and **Menu** / **Sign out** sit at the **viewport** right (with padding). **`HeaderNavMenu`** opens a dropdown: legal docs → **`LegalViewer`**, plus **Our Mission** (**`MissionPage.jsx`**) and **Support** (**`SupportPage.jsx`** — contact email + in-debate reporting note). Overlays driven by **`headerOverlay`** state in **`App.jsx`**. When logged in, **`.app--with-global-header`** removes duplicate top padding on the main column.
 - **Custom lobbies (new):** In **Custom debates**, users can switch tabs: **Join servers** (live open-lobby browser + **Join by code**) and **Create server** (statement + visibility mode). Visibility options: **Open lobby** (shows in list) or **Code-only** (hidden, code join only). Creating a lobby now places the creator into a waiting debate view immediately; if a challenger leaves, the creator remains in-session and returns to waiting until they end the lobby.
-- **Socket.IO authentication (new):** Socket.IO handshake can optionally verify the user’s Firebase ID token using Firebase Admin SDK. Server enforcement is controlled by environment configuration; when not configured it will not block local development.
+- **Socket.IO authentication:** Server can verify the Firebase ID token (Admin SDK) on handshake when **`REQUIRE_FIREBASE_TOKEN=true`**. **Client (`App.jsx`):** the socket `useEffect` runs an **async IIFE** that **`await`s `auth.currentUser.getIdToken()`** before **`io()`**, so the handshake always sends **`auth: { token }`** in production—connecting on `firebaseUserId` alone used to race and send **`auth: {}`**, which failed token enforcement. The effect **depends only on `firebaseUserId`** (not token state) so hourly token refresh does not reconnect Socket.IO.
 - **Production deployment status (new):** Live on Railway with GitHub auto-deploy. Build-time Firebase client env injection is handled in Docker build stage; Railway variable changes must be applied before redeploy.
 - **Production smoke (2026-03-24):** Quick Match + live **video/audio** confirmed on **two separate PCs** (two accounts, production URL).
 - **Operational hardening (new):** Server adds metrics logs, periodic custom-lobby stale cleanup with TTL sweep/logging, and a single-active-session-per-uid guard to reduce multi-tab/window edge cases.
 - **Custom host moderation (new):** In active custom debates, the creator can **Kick opponent**. Server authorizes only the lobby creator for this action; kicked user returns to custom screen while host remains in waiting-lobby state.
+
+### Data storage (Firestore + server)
+
+| Collection / path | Who writes | Purpose |
+|-------------------|------------|---------|
+| **`users/{email}`** | Client | Profile doc id = **sign-in email** (matches `auth.token.email`). Fields: `app`, `lastSeenAt`, **`uid`**, **`email`**. |
+| **`users/{email}/debates`** (docs) | Client (`logDebateSessionEnd`) | Per-user session log (same fields as before): topic/custom, side, duration, **`peerUid`**, etc. Drives **Past sessions**. |
+| **`debates`** (top-level, legacy) | — | **Creates disabled** in rules. Old rows still **readable** by owner; app merges legacy + nested when loading history. |
+| **`reports`** (docs) | Client (`submitReport`) | Moderation tickets with **optional `peerUid`**, **`matchMode`**, room/topic context. |
+| **`match_sessions/{roomId}`** | **Server only** (Firebase Admin) | Canonical match: **`proUid`**, **`conUid`**, **`topicId`**, **`matchMode`**, **`roomCode`**, **`statement`**, timestamps. Written on **`matched`**. **Not readable by clients** (rules deny); use Console / future admin API. |
+| **`match_sessions/{roomId}/chat_messages`** | **Server only** (Admin) | Append-only chat lines: **`authorUid`**, **`authorSocketId`**, **`text`**, **`sentAtMs`**. Written when **`debate-chat`** is relayed. |
+| **`moderation_actions`** (docs) | **Server only** (Admin) | Operator audit log: **`targetUid`**, **`action`**, **`reason`**, **`actorLabel`**, optional report/room refs, **`createdAt`**. Written via **`POST /api/mod/actions`** or auth disable/enable routes. |
+
+Persistence helpers live in **`server/persistence.js`**. If Firebase Admin is **not** initialized locally, server **skips** `match_sessions` / chat writes (client **`debates`** / **`reports`** still work).
+
+**Operator API:** **`server/moderationApi.js`** mounts **`/api/mod/*`** when **`CHITCHAT_MODERATION_SECRET`** is set (16+ chars). Lists reports, loads **`match_sessions`** + chat, lists user **`debates`**, logs **`moderation_actions`**, and can **disable/enable** Firebase Auth users. See **`docs/MODERATION.md`**. **HTTPS + secret rotation** in production.
+
+**Deploy:** Update **`firestore.rules`** in Firebase Console when `peerUid` / `match_sessions` rules change.
 
 ---
 
@@ -123,6 +141,8 @@ Debate Website/
     PROJECT_MEMORY.md    # This file — refresh facts each session
   server/
     index.js             # Express, Socket.IO, queues, routes
+    moderationApi.js     # Operator-only /api/mod (reports, sessions, audit, auth disable)
+    persistence.js       # Firestore Admin: match_sessions + chat_messages
     rateLimit.js         # Fixed-window limiter + client IP helper
     rtcConfig.js         # ICE config from env + defaults
   shared/
@@ -212,10 +232,10 @@ Copy `.env.example` to `.env` locally if needed (`.env` is gitignored). For Fire
 - **Custom lobby cleanup:** A server-side sweep runs every ~60s to remove orphaned/expired custom lobbies. When it changes state, it broadcasts the updated open-lobby list and logs a concise summary (orphaned/expired/recovered counts + codes).
 - **Planned next:** Run a production smoke-test matrix (Quick match + Custom open + Custom code-only + multi-tab safeguard recovery) and review metrics/cleanup logs for the first 24h; then tune `CUSTOM_LOBBY_TTL_MS` if needed and finish any remaining custom-mode copy consistency.
 - **Railway variables:** New/changed vars remain staged until **Apply changes** is clicked in the Railway UI.
-- **Production quick-match reliability:** Socket connection now tolerates temporary ID token unavailability in optional auth mode and shows clearer connection errors instead of a silent side-button no-op.
-- **Socket lifecycle:** Socket.IO `useEffect` should **not** depend on `firebaseIdToken` (token refresh would reconnect and race matchmaking). Quick Match sets **waiting optimistically** on `join-queue` / `join-custom-room` emit; server still confirms with `queued` or `queue-error`.
+- **Production Socket.IO + Firebase:** With **`REQUIRE_FIREBASE_TOKEN`**, the client must **not** call `io()` until **`getIdToken()`** resolves; otherwise the handshake fails and matchmaking/custom lobbies break for all users. Implementation: **`await user.getIdToken()`** inside the socket bootstrap in **`App.jsx`**, then connect with **`auth: { token }`**. Do **not** put Firebase ID token in the `useEffect` dependency array (token refresh would reconnect and race matchmaking).
+- **Socket lifecycle:** Same as above—**`firebaseUserId`**-only deps for the socket effect; **`connect_error`** surfaces a visible error if the handshake fails.
 - **Production transport hardening:** Express SPA fallback now skips `/socket.io` routes to avoid polling transport interception in production builds.
-- **Queue UI acknowledgement rule:** Waiting spinner should only render after server `queued` ack (not immediately on click).
+- **Queue UI:** Quick Match / custom join set **waiting optimistically** on emit; server still confirms with **`queued`** or **`queue-error`** (and can clear waiting on error).
 - **Firebase:** If keys are missing, the app still runs; only the dev hint appears (in development). If **Email/Password** is not enabled in Console, sign-in or sign-up errors surface on **`AuthScreen`** (`auth/operation-not-allowed`).
 
 ---
@@ -231,6 +251,9 @@ Copy `.env.example` to `.env` locally if needed (`.env` is gitignored). For Fire
 
 Short bullets for the **latest** context; keep recent history; trim only when noisy.
 
+- **2026-03-23:** **Moderation API** — **`CHITCHAT_MODERATION_SECRET`**, **`/api/mod/*`** (**`moderationApi.js`**), Firestore **`moderation_actions`**, Auth disable/enable + audit; **`docs/MODERATION.md`**.
+- **2026-03-23:** **Debate data model** — Server writes **`match_sessions`** + **`chat_messages`** (Admin SDK). **`matched`** includes **`peerUid`**; **`debates`** / **`reports`** / Play history UI enriched; **`firestore.rules`** updated (**`match_sessions`** denied to clients). **`server/persistence.js`**.
+- **2026-03-23:** **Socket.IO auth before connect** — `App.jsx` awaits **`getIdToken()`** before **`io()`** so Railway/production **`REQUIRE_FIREBASE_TOKEN`** handshakes succeed; removed unused **`firebaseIdToken`** React state. **`docs/DEV_LOG.md`** + **`PROJECT_MEMORY.md`** updated.
 - **2026-03-22:** **Docs pass** — **`PROJECT_MEMORY`** / **`DEV_LOG`** updated; **§2** + file map now spell out **`ReportIssue`**, **`reports`**, and **90s report cooldown** (`localStorage` key `chitchat:lastReportAt`).
 - **2026-03-23:** **Custom mode overhaul** — two custom tabs (**Join servers** / **Create server**), **Join by code** restored, creation visibility (`open` vs `code-only`), creator stays in waiting lobby after challenger leaves, copy confirmation (`✓ Copied`), and Firestore alignment (`topicId: "custom"` + optional debates fields in rules).
 - **2026-03-23:** **Custom lobby cleanup** — periodic stale-lobby sweep with TTL (`CUSTOM_LOBBY_TTL_MS`) plus server logs and automatic refresh of open-lobby list when cleanup changes state.
@@ -246,7 +269,7 @@ Short bullets for the **latest** context; keep recent history; trim only when no
 - **2026-03-22:** **Legal suite** in-app — Terms, Privacy, Community Guidelines, Recording & Streaming Consent (`src/legal/`). **Signup** certification (18+ + policies). **`VITE_CONTACT_EMAIL`**, **`contactEmail.js`**. **Chitchat logo** (`public/chitchat-logo.png`, **`BrandLogo`**). **Auth UI** restyled (card, “More sign-in options”, full-bleed **`app--auth-only`**). **Global theme** centralized in **`index.css`** (iterated: earthy green → vibrant grass → **sky blue**); **`AuthScreen.css`** + **`App.css`** aligned. Removed unused **`LegalPlaceholder`**. **Community Guidelines** emoji-free.
 - **2026-03-22:** MVP + server validation + `rtc-config` + `leave-debate` + dev proxies documented. Node installed via winget; `npm run dev` verified. User asked for **DEV_LOG + PROJECT_MEMORY**; both exist—this file expanded so a future session can resume without re-reading the whole chat.
 - **2026-03-22 (same day):** User asked to ensure both docs are updated so “future self” has full continuity—**this PROJECT_MEMORY** and **DEV_LOG** were refreshed with architecture, event contracts, gaps, and maintenance rules.
-- **2026-03-22:** **Email/password gate** — `AuthScreen`, `onAuthStateChanged`, Socket only after login; **Sign out** in header. Anonymous auth removed.
+- **2026-03-22:** **Email/password gate** — `AuthScreen`, auth listener (**now `onIdTokenChanged`**), Socket only after login; **Sign out** in header. Anonymous auth removed.
 - **2026-03-22:** **Past sessions** screen (loads `debates` for the current uid).
 - **2026-03-22:** **Firestore persistence** — `users/{uid}` presence, `debates` session logs; **rules** updated; **Dockerfile** + **`docs/DEPLOY.md`**.
 - **2026-03-22:** **Device selection** for camera/microphone before debates (`DeviceSettings`, `mediaUtils`).

@@ -1268,6 +1268,20 @@
   opacity: 0.5;
 }
 
+.history-item-statement {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0.35rem 0 0;
+  line-height: 1.35;
+}
+
+.history-item-peer {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0.25rem 0 0;
+  opacity: 0.9;
+}
+
 .dev-hint {
   text-align: left;
   font-size: 0.85rem;

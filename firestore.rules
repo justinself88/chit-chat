@@ -1,30 +1,54 @@
 rules_version = '2';
 
+// Chitchat — requires a signed-in Firebase Auth user (email/password; no Anonymous).
+// users/{email} — document id = lowercase email (matches auth.token.email.lower()). Subcollection: debates.
 // Paste into Firebase Console → Firestore → Rules, or: firebase deploy --only firestore:rules
-// Requires any Firebase Auth user (signed-in). Email/password accounts in this app.
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+    function isSignedIn() {
+      return request.auth != null;
     }
 
+    // Profile doc id must match the signed-in user's email claim (use lowercase in app + Console paths).
+    function isOwnUserEmailDoc(userKey) {
+      return isSignedIn()
+        && request.auth.token.email is string
+        && userKey == request.auth.token.email.lower()
+        && userKey.size() <= 320;
+    }
+
+    match /users/{userKey} {
+      allow read, write: if isOwnUserEmailDoc(userKey);
+
+      match /debates/{debateId} {
+        allow create: if isOwnUserEmailDoc(userKey)
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.topicId is string
+          && request.resource.data.yourSide in ['pro', 'con']
+          && request.resource.data.reason is string
+          && request.resource.data.startedAtMs is int
+          && request.resource.data.endedAtMs is int
+          && request.resource.data.durationSec is int
+          && (!('matchMode' in request.resource.data) || request.resource.data.matchMode in ['quick', 'custom'])
+          && (!('roomCode' in request.resource.data)
+            || (request.resource.data.roomCode is string && request.resource.data.roomCode.size() <= 32))
+          && (!('statement' in request.resource.data)
+            || (request.resource.data.statement is string && request.resource.data.statement.size() <= 500))
+          && (!('peerUid' in request.resource.data)
+            || (request.resource.data.peerUid is string && request.resource.data.peerUid.size() <= 128));
+
+        allow read: if isOwnUserEmailDoc(userKey);
+
+        allow update, delete: if false;
+      }
+    }
+
+    // Legacy top-level debates (older app versions). Reads only — new writes use users/{email}/debates.
     match /debates/{debateId} {
-      allow create: if request.auth != null
-        && request.resource.data.uid == request.auth.uid
-        && request.resource.data.topicId is string
-        && request.resource.data.yourSide in ['pro', 'con']
-        && request.resource.data.reason is string
-        && request.resource.data.startedAtMs is int
-        && request.resource.data.endedAtMs is int
-        && request.resource.data.durationSec is int
-        // Optional fields for newer custom-lobby mode.
-        && (!('matchMode' in request.resource.data) || request.resource.data.matchMode in ['quick', 'custom'])
-        && (!('roomCode' in request.resource.data) || request.resource.data.roomCode is string)
-        && (!('statement' in request.resource.data) || request.resource.data.statement is string);
-
+      allow create: if false;
       allow read: if request.auth != null && resource.data.uid == request.auth.uid;
-
       allow update, delete: if false;
     }
 
@@ -37,11 +61,26 @@ service cloud.firestore {
         && request.resource.data.details is string
         && request.resource.data.details.size() > 0
         && request.resource.data.details.size() <= 2000
-        && (request.resource.data.roomId == null || request.resource.data.roomId is string);
+        && (request.resource.data.roomId == null || request.resource.data.roomId is string)
+        && (!('peerUid' in request.resource.data)
+          || (request.resource.data.peerUid is string && request.resource.data.peerUid.size() <= 128))
+        && (!('matchMode' in request.resource.data) || request.resource.data.matchMode in ['quick', 'custom']);
 
       allow read: if request.auth != null && resource.data.reporterUid == request.auth.uid;
 
       allow update, delete: if false;
+    }
+
+    match /match_sessions/{sessionId} {
+      allow read, write: if false;
+    }
+
+    match /match_sessions/{sessionId}/chat_messages/{messageId} {
+      allow read, write: if false;
+    }
+
+    match /moderation_actions/{actionId} {
+      allow read, write: if false;
     }
   }
 }

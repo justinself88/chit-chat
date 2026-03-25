@@ -56,7 +56,6 @@ export default function App() {
   const [camOn, setCamOn] = useState(true);
   const [connState, setConnState] = useState(null);
   const [firebaseUserId, setFirebaseUserId] = useState(null);
-  const [firebaseIdToken, setFirebaseIdToken] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [videoDeviceId, setVideoDeviceId] = useState('');
   const [audioDeviceId, setAudioDeviceId] = useState('');
@@ -108,7 +107,7 @@ export default function App() {
     setHistoryLoading(true);
     setHistoryError(null);
     try {
-      const rows = await fetchRecentDebates(firebaseUserId);
+      const rows = await fetchRecentDebates(40);
       setHistoryRows(rows);
     } catch (e) {
       setHistoryError(e?.message ?? 'Could not load history.');
@@ -132,6 +131,10 @@ export default function App() {
       startedAtMs: s.startedAtMs,
       reason,
       connectionState: pcRef.current?.connectionState ?? null,
+      peerUid: s.peerUid ?? null,
+      matchMode: s.matchMode ?? null,
+      roomCode: s.roomCode ?? null,
+      statement: s.statement ?? null,
     });
     debateSessionRef.current = null;
   }, []);
@@ -166,19 +169,9 @@ export default function App() {
       setAuthReady(true);
       return;
     }
-    const unsub = onIdTokenChanged(auth, async (user) => {
+    const unsub = onIdTokenChanged(auth, (user) => {
       setFirebaseUserId(user?.uid ?? null);
-      setFirebaseIdToken(null);
       if (user) syncUserPresence();
-      if (user) {
-        try {
-          const token = await user.getIdToken();
-          setFirebaseIdToken(token);
-        } catch {
-          // Keep app usable in optional server-auth mode (no token required).
-          setFirebaseIdToken(null);
-        }
-      }
       setAuthReady(true);
     });
     return () => unsub();
@@ -201,14 +194,35 @@ export default function App() {
   useEffect(() => {
     if (!isFirebaseConfigured || !firebaseUserId) return;
 
-    const socket = io({
-      path: '/socket.io',
-      transports: ['websocket', 'polling'],
-      auth: firebaseIdToken ? { token: firebaseIdToken } : {},
-    });
-    socketRef.current = socket;
+    let cancelled = false;
 
-    const syncSocketId = () => setSocketId(socket.id ?? null);
+    (async () => {
+      const user = auth.currentUser;
+      if (!user || user.uid !== firebaseUserId) return;
+      let token;
+      try {
+        token = await user.getIdToken();
+      } catch {
+        if (!cancelled) {
+          setError('Could not get sign-in token. Please refresh and try again.');
+        }
+        return;
+      }
+      if (cancelled || !token) return;
+
+      const socket = io({
+        path: '/socket.io',
+        transports: ['websocket', 'polling'],
+        auth: { token },
+      });
+      if (cancelled) {
+        socket.disconnect();
+        return;
+      }
+
+      socketRef.current = socket;
+
+      const syncSocketId = () => setSocketId(socket.id ?? null);
     socket.on('connect', syncSocketId);
     if (socket.connected) syncSocketId();
 
@@ -267,6 +281,7 @@ export default function App() {
         matchMode: payload.matchMode ?? 'quick',
         roomCode: payload.roomCode ?? null,
         statement: payload.statement ?? null,
+        peerUid: payload.peerUid ?? null,
       });
       setStep('debate');
 
@@ -286,6 +301,10 @@ export default function App() {
           yourSide: payload.yourSide,
           roomId: payload.roomId,
           startedAtMs: Date.now(),
+          peerUid: payload.peerUid ?? null,
+          matchMode: payload.matchMode ?? 'quick',
+          roomCode: payload.roomCode ?? null,
+          statement: payload.statement ?? null,
         };
 
         const pc = new RTCPeerConnection(rtcConfigRef.current);
@@ -374,6 +393,10 @@ export default function App() {
               yourSide: 'pro',
               roomId: roomCode ?? null,
               startedAtMs: Date.now(),
+              peerUid: null,
+              matchMode: 'custom',
+              roomCode: roomCode ?? null,
+              statement: statement ?? null,
             };
           })
           .catch((e) => {
@@ -495,16 +518,21 @@ export default function App() {
       setSide(null);
     });
 
+    })();
+
     return () => {
-      socket.off('connect', syncSocketId);
+      cancelled = true;
       setSocketId(null);
-      socket.emit('leave-queue');
-      cleanupMedia();
-      socket.disconnect();
-      socketRef.current = null;
+      const sock = socketRef.current;
+      if (sock) {
+        sock.emit('leave-queue');
+        cleanupMedia();
+        sock.disconnect();
+        socketRef.current = null;
+      }
     };
-    // Intentionally omit firebaseIdToken: token refresh must not reconnect Socket.IO or
-    // matchmaking emits can race / miss `queued`. Auth uses token from first run; optional mode OK.
+    // Handshake awaits getIdToken() so production REQUIRE_FIREBASE_TOKEN succeeds; effect deps
+    // stay on firebaseUserId only so hourly token refresh does not reconnect Socket.IO.
   }, [cleanupMedia, flushDebateLog, firebaseUserId]);
 
   const pickTopic = (id) => {
@@ -1153,6 +1181,8 @@ export default function App() {
             topicId={debateInfo.topicId}
             roomId={debateInfo.roomId}
             yourSide={debateInfo.yourSide}
+            peerUid={debateInfo.peerUid ?? null}
+            matchMode={debateInfo.matchMode ?? null}
           />
         </div>
       )}

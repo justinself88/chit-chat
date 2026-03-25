@@ -6,6 +6,68 @@ Chronological record of **what changed** and **why**. **`PROJECT_MEMORY.md`** ho
 
 ---
 
+## Session: 2026-03-25 (Firestore: users by email + debates subcollection)
+
+### Summary
+
+- **`users/{email}`** (doc id = Firebase **`auth.token.email`**) replaces **`users/{uid}`** for profile + presence; fields include **`uid`** and **`email`** for cross-reference.
+- Session logs write to **`users/{email}/debates`**. Legacy top-level **`debates`** are read-only (`create: if false`); app merges legacy + nested for **Past sessions**.
+- **Moderation API** `/user/:uid/debates` resolves Auth email and reads nested **`debates`** plus legacy.
+- **`userProfileDocId()`** exported from **`chitChatFirestore.js`**.
+
+### Files
+
+- `firestore.rules`, `src/chitChatFirestore.js`, `src/App.jsx`, `src/DebateHistory.jsx`, `server/moderationApi.js`, `docs/PROJECT_MEMORY.md`, `docs/DEV_LOG.md`
+
+### Deploy
+
+- Publish updated **`firestore.rules`**. Optionally delete obsolete **`users/{oldUid}`** documents in Console (orphaned after switch).
+
+## Session: 2026-03-23 (feature: operator moderation API + audit DB)
+
+### Summary
+
+- **`moderation_actions`** Firestore collection (Admin-only; rules deny clients) stores operator decisions and notes.
+- **`server/moderationApi.js`**: HTTP **`/api/mod/*`** protected by **`CHITCHAT_MODERATION_SECRET`** — list reports, fetch match + chat by **`roomId`**, list user **`debates`** / **`match_sessions`**, append **`moderation_actions`**, **disable/enable** Auth users with audit rows.
+- SPA fallback skips **`/api/*`** so JSON routes are not replaced by **`index.html`**.
+- **`docs/MODERATION.md`**, **`.env.example`**, **`firestore.rules`**, **`PROJECT_MEMORY`**.
+
+### Deploy
+
+- Set secret + Admin credentials on Railway; paste updated **`firestore.rules`** if not already.
+
+## Session: 2026-03-23 (feature: debate data storage — sessions, chat, history)
+
+### Summary
+
+- **Canonical matches:** When Firebase Admin is available, the server writes **`match_sessions/{roomId}`** with **`proUid`**, **`conUid`**, topic/custom metadata, and timestamps on each **`matched`** pairing.
+- **Chat log:** Each relayed **`debate-chat`** message is appended under **`match_sessions/{roomId}/chat_messages`** ( **`authorUid`**, **`text`**, **`sentAtMs`**, socket id for audit).
+- **Per-user history & reports:** **`matched`** now includes **`peerUid`** (opponent Firebase uid). **`logDebateSessionEnd`** stores optional **`peerUid`**, **`matchMode`**, **`roomCode`**, **`statement`** on **`debates`**. **`submitReport`** stores optional **`peerUid`** and **`matchMode`**. **`firestore.rules`**: client-readable collections unchanged scope; **`match_sessions/**` denied to clients (Admin-only writes).
+- **UI:** Past sessions list shows custom/quick label, room code, statement preview, and a short note when a matched participant is linked.
+
+### Files
+
+- `server/persistence.js`, `server/index.js`, `src/chitChatFirestore.js`, `src/App.jsx`, `src/ReportIssue.jsx`, `src/DebateHistory.jsx`, `src/App.css`, `firestore.rules`, `docs/PROJECT_MEMORY.md`, `docs/DEV_LOG.md`
+
+### Deploy note
+
+- Paste updated **`firestore.rules`** into Firebase Console (or CLI) so production matches the repo.
+
+## Session: 2026-03-23 (fix: Socket.IO auth before connect)
+
+### Summary
+
+- **Bug:** Socket.IO connected as soon as `firebaseUserId` was set, often **before** a Firebase ID token was available—handshake used `auth: {}` and failed when `REQUIRE_FIREBASE_TOKEN=true` (Railway/production), so **both accounts** failed custom lobby / matchmaking.
+- **Fix:** Bootstrap the client with **`await auth.currentUser.getIdToken()`** inside the socket `useEffect` (async IIFE), then connect with `auth: { token }`. Effect deps remain **`firebaseUserId` only** so token refresh does not reconnect the socket. Removed unused `firebaseIdToken` React state.
+
+### Files
+
+- `src/App.jsx`, `docs/DEV_LOG.md`, `docs/PROJECT_MEMORY.md`
+
+### Commands
+
+- `npm run build` — verified after change.
+
 ## Session: 2026-03-24 (fix: Quick Match waiting + stable Socket.IO)
 
 ### Summary

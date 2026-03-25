@@ -1,7 +1,15 @@
 import { TOPICS } from './topics.js';
 
 function topicTitle(id) {
+  if (id === 'custom') return 'Custom debate';
   return TOPICS.find((t) => t.id === id)?.label ?? id;
+}
+
+function formatStatementPreview(s) {
+  if (!s || typeof s !== 'string') return null;
+  const t = s.trim();
+  if (!t) return null;
+  return t.length > 80 ? `${t.slice(0, 80)}…` : t;
 }
 
 function formatDuration(sec) {
@@ -24,7 +32,7 @@ export default function DebateHistory({ rows, loading, error, onBack, onRefresh 
     <div className="panel history-panel">
       <h2>Past sessions</h2>
       <p className="history-lead">
-        Stored in your Firebase project for your signed-in account.
+        Stored under your account in Firestore (users → your email → debates).
       </p>
 
       <div className="history-toolbar">
@@ -62,7 +70,25 @@ export default function DebateHistory({ rows, loading, error, onBack, onRefresh 
                 <span>{formatDuration(row.durationSec)}</span>
                 <span className="history-dot">·</span>
                 <span>{reasonLabel(row.reason)}</span>
+                {row.matchMode && (
+                  <>
+                    <span className="history-dot">·</span>
+                    <span>{row.matchMode === 'custom' ? 'Custom lobby' : 'Quick match'}</span>
+                  </>
+                )}
+                {row.roomCode && (
+                  <>
+                    <span className="history-dot">·</span>
+                    <span>Code {row.roomCode}</span>
+                  </>
+                )}
               </div>
+              {formatStatementPreview(row.statement) && (
+                <p className="history-item-statement">{formatStatementPreview(row.statement)}</p>
+              )}
+              {row.peerUid && (
+                <p className="history-item-peer">Matched with another participant (session linked in our records).</p>
+              )}
             </li>
           ))}
         </ul>

@@ -9,6 +9,8 @@ import { ALLOWED_TOPIC_IDS } from '../shared/topics.js';
 import { getRtcConfigForClient } from './rtcConfig.js';
 import { createRateLimiter, getClientIp } from './rateLimit.js';
 import admin from 'firebase-admin';
+import { persistChatMessage, persistMatchSession } from './persistence.js';
+import { attachModerationRoutes } from './moderationApi.js';
 
 const joinQueueWindowMs = Math.max(
   5000,
@@ -201,11 +203,15 @@ app.get('/api/rtc-config', (_req, res) => {
   res.json(getRtcConfigForClient());
 });
 
+app.use(express.json({ limit: '64kb' }));
+attachModerationRoutes(app, { isAdminReady: () => firebaseAdminReady });
+
 if (existsSync(dist)) {
   app.use(express.static(dist));
   app.get('*', (req, res, next) => {
-    // Let Socket.IO HTTP transport endpoints bypass SPA fallback.
+    // Let Socket.IO HTTP transport and other /api routes bypass SPA fallback.
     if (req.path.startsWith('/socket.io')) return next();
+    if (req.path.startsWith('/api/')) return next();
     res.sendFile(join(dist, 'index.html'));
   });
 }
@@ -429,11 +435,27 @@ io.on('connection', (socket) => {
 
       peerSocket.data.roomId = roomId;
       peerSocket.join(roomId);
+
+      const proUidQuick =
+        socket.data.side === 'pro' ? socket.data.uid ?? null : peerSocket.data.uid ?? null;
+      const conUidQuick =
+        socket.data.side === 'con' ? socket.data.uid ?? null : peerSocket.data.uid ?? null;
+      persistMatchSession(firebaseAdminReady, {
+        roomId,
+        proUid: proUidQuick,
+        conUid: conUidQuick,
+        topicId,
+        matchMode: 'quick',
+        roomCode: null,
+        statement: null,
+      });
+
       peerSocket.emit('matched', {
         roomId,
         isOfferer: false,
         topicId,
         yourSide: peerSocket.data.side,
+        peerUid: socket.data.uid ?? null,
       });
 
       socket.emit('matched', {
@@ -441,6 +463,7 @@ io.on('connection', (socket) => {
         isOfferer: true,
         topicId,
         yourSide: side,
+        peerUid: peerSocket.data.uid ?? null,
       });
       metrics.matches += 1;
       return;
@@ -586,6 +609,21 @@ io.on('connection', (socket) => {
 
       peerSocket.data.roomId = roomId;
       peerSocket.join(roomId);
+
+      const proUidCustom =
+        socket.data.side === 'pro' ? socket.data.uid ?? null : peerSocket.data.uid ?? null;
+      const conUidCustom =
+        socket.data.side === 'con' ? socket.data.uid ?? null : peerSocket.data.uid ?? null;
+      persistMatchSession(firebaseAdminReady, {
+        roomId,
+        proUid: proUidCustom,
+        conUid: conUidCustom,
+        topicId: 'custom',
+        matchMode: 'custom',
+        roomCode: normalizedRoomCode,
+        statement: game.statement,
+      });
+
       peerSocket.emit('matched', {
         roomId,
         isOfferer: false,
@@ -594,6 +632,7 @@ io.on('connection', (socket) => {
         matchMode: 'custom',
         roomCode: normalizedRoomCode,
         statement: game.statement,
+        peerUid: socket.data.uid ?? null,
       });
 
       socket.emit('matched', {
@@ -604,6 +643,7 @@ io.on('connection', (socket) => {
         matchMode: 'custom',
         roomCode: normalizedRoomCode,
         statement: game.statement,
+        peerUid: peerSocket.data.uid ?? null,
       });
       metrics.matches += 1;
       game.activeRoomId = roomId;
@@ -740,6 +780,13 @@ io.on('connection', (socket) => {
       });
       return;
     }
+    persistChatMessage(firebaseAdminReady, {
+      roomId,
+      authorUid: socket.data.uid ?? null,
+      authorSocketId: socket.id,
+      text: trimmed,
+      sentAtMs: now,
+    });
     io.to(roomId).emit('debate-chat', {
       text: trimmed,
       from: socket.id,
