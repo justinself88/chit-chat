@@ -46,6 +46,7 @@
 |-------------------|------------|---------|
 | **`users/{email}`** | Client | Profile doc id = **sign-in email** (matches `auth.token.email`). Fields: `app`, `lastSeenAt`, **`uid`**, **`email`**. |
 | **`users/{email}/debates`** (docs) | Client (`logDebateSessionEnd`) | Per-user session log (same fields as before): topic/custom, side, duration, **`peerUid`**, etc. Drives **Past sessions**. |
+| **`users/{email}/text_chat`** (docs) | **Server only** (Admin) | One doc per line mirrored from in-debate chat: **`roomId`**, **`text`**, **`sentAtMs`**, **`fromUid`**, **`direction`** (`sent` \| `received`), **`peerUid`**, **`createdAt`**. Appears next to **`debates`** in Console. |
 | **`debates`** (top-level, legacy) | — | **Creates disabled** in rules. Old rows still **readable** by owner; app merges legacy + nested when loading history. |
 | **`reports`** (docs) | Client (`submitReport`) | Moderation tickets with **optional `peerUid`**, **`matchMode`**, room/topic context. |
 | **`match_sessions/{roomId}`** | **Server only** (Firebase Admin) | Canonical match: **`proUid`**, **`conUid`**, **`topicId`**, **`matchMode`**, **`roomCode`**, **`statement`**, timestamps. Written on **`matched`**. **Not readable by clients** (rules deny); use Console / future admin API. |

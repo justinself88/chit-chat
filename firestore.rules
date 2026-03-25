@@ -1,7 +1,7 @@
 rules_version = '2';
 
 // Chitchat — requires a signed-in Firebase Auth user (email/password; no Anonymous).
-// users/{email} — document id = lowercase email (matches auth.token.email.lower()). Subcollection: debates.
+// users/{email} — document id = lowercase email. Subcollections: debates, text_chat (mirror of in-debate chat).
 // Paste into Firebase Console → Firestore → Rules, or: firebase deploy --only firestore:rules
 
 service cloud.firestore {
@@ -42,6 +42,12 @@ service cloud.firestore {
         allow read: if isOwnUserEmailDoc(userKey);
 
         allow update, delete: if false;
+      }
+
+      // In-debate text lines (written only by server / Admin SDK). User may read own thread in Console + app.
+      match /text_chat/{messageId} {
+        allow read: if isOwnUserEmailDoc(userKey);
+        allow write: if false;
       }
     }
 
