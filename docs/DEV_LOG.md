@@ -6,6 +6,30 @@ Chronological record of **what changed** and **why**. **`PROJECT_MEMORY.md`** ho
 
 ---
 
+## Session: 2026-03-28 (verified email required)
+
+### Summary
+
+- **Signup:** After **`createUserWithEmailAndPassword`**, the app calls **`sendEmailVerification`** (best-effort; user can **Resend** from the gate screen if it fails).
+- **Gate:** **`VerifyEmailScreen`** when `user` exists and **`!user.emailVerified`**. Actions: **I’ve verified** (**`reload`** + **`getIdToken(true)`** so **`onIdTokenChanged`** updates), **Resend** (60s cooldown), **Sign out**. Main app + Socket.IO + **`syncUserPresence`** only run when **`emailVerified`**.
+- **Firestore:** **`isSignedIn()`** now requires **`request.auth.token.email_verified == true`**; legacy **`debates`** and **`reports`** rules use **`isSignedIn()`** where appropriate.
+- **Server:** After **`verifyIdToken`**, Socket.IO rejects connections when **`email_verified !== true`** (clear error message).
+- **Copy:** Auth lead text notes confirmation link for new accounts.
+
+### Files
+
+- `src/AuthScreen.jsx`, `src/VerifyEmailScreen.jsx`, `src/App.jsx`, `firestore.rules`, `server/index.js`, `docs/PROJECT_MEMORY.md`, `docs/DEV_LOG.md`
+
+### Deploy
+
+- Publish **`firestore.rules`**. Redeploy the Node server. In Firebase Console, review **Authentication → Templates → Email address verification** (action URL / branding).
+
+### Follow-ups
+
+- Optional: **Authentication → Settings → Authorized domains** if links should open on a custom domain.
+
+---
+
 ## Session: 2026-03-25 (server: match + in-debate chat under `users/{email}/debates/{roomId}`)
 
 ### Summary

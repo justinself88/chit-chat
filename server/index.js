@@ -109,6 +109,11 @@ io.use(async (socket, next) => {
 
   try {
     const decoded = await admin.auth().verifyIdToken(token);
+    if (decoded.email_verified !== true) {
+      return next(
+        new Error('Verify your email before joining debates. Check your inbox for the link.')
+      );
+    }
     socket.data.uid = decoded.uid;
     return next();
   } catch (e) {

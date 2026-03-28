@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// Chitchat — requires a signed-in Firebase Auth user (email/password; no Anonymous).
+// Chitchat — signed-in Firebase Auth user with verified email (email/password; no Anonymous).
 // users/{email} — document id = lowercase email. Subcollections: debates (+ chat_messages from server), legacy text_chat.
 // Paste into Firebase Console → Firestore → Rules, or: firebase deploy --only firestore:rules
 
@@ -8,7 +8,7 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     function isSignedIn() {
-      return request.auth != null;
+      return request.auth != null && request.auth.token.email_verified == true;
     }
 
     // Profile doc id must match the signed-in user's email claim (use lowercase in app + Console paths).
@@ -60,12 +60,12 @@ service cloud.firestore {
     // Legacy top-level debates (older app versions). Reads only — new writes use users/{email}/debates.
     match /debates/{debateId} {
       allow create: if false;
-      allow read: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
       allow update, delete: if false;
     }
 
     match /reports/{reportId} {
-      allow create: if request.auth != null
+      allow create: if isSignedIn()
         && request.resource.data.reporterUid == request.auth.uid
         && request.resource.data.topicId is string
         && request.resource.data.yourSide in ['pro', 'con']
@@ -78,7 +78,7 @@ service cloud.firestore {
           || (request.resource.data.peerUid is string && request.resource.data.peerUid.size() <= 128))
         && (!('matchMode' in request.resource.data) || request.resource.data.matchMode in ['quick', 'custom']);
 
-      allow read: if request.auth != null && resource.data.reporterUid == request.auth.uid;
+      allow read: if isSignedIn() && resource.data.reporterUid == request.auth.uid;
 
       allow update, delete: if false;
     }

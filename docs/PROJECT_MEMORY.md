@@ -6,7 +6,7 @@
 |--------|--------|
 | **Site name** | **Chit Chat** |
 | **Project name (npm)** | `chit-chat` (workspace folder: `Debate Website`) |
-| **Last updated** | 2026-03-25 (match + in-debate chat under `users/{email}/debates/{roomId}`) |
+| **Last updated** | 2026-03-28 (verified email required for app + Firestore + Socket token) |
 | **Database / BaaS** | **Firebase** — **Email/password Auth** + Firestore (`src/firebase.js`, `AuthScreen.jsx`) |
 
 ---
@@ -26,7 +26,7 @@
 - **WebRTC:** `getUserMedia`, `RTCPeerConnection`, STUN by default; client loads ICE config from **`GET /api/rtc-config`** (optional TURN via `ICE_SERVERS_JSON` on server). **Device picker:** collapsible **Camera & microphone** panel (before a debate) requests permission, lists inputs, preview, and passes `deviceId` constraints into the live call (`DeviceSettings.jsx`, `mediaUtils.js`).
 - **Signaling race handling:** Client buffers Socket.IO `signal` events until `RTCPeerConnection` exists, then flushes (answerer can receive offer before PC is ready).
 - **Production path:** `npm run build` produces `dist/`; `npm start` runs `server/index.js`, which serves static files + SPA fallback when `dist` exists.
-- **Firebase (client):** `onIdTokenChanged` drives session (uid + token lifecycle); **`AuthScreen`** is email/password only (no anonymous). **`src/chitChatFirestore.js`** — **`syncUserPresence()`**, **`logDebateSessionEnd()`**; **`fetchRecentDebates`** for Past sessions. Deploy **`firestore.rules`**; enable **Email/Password** in Firebase Console (optionally **disable Anonymous**).
+- **Firebase (client):** `onIdTokenChanged` drives session (uid + token lifecycle); **`AuthScreen`** is email/password only (no anonymous). **New accounts** trigger **`sendEmailVerification`**; **`VerifyEmailScreen`** blocks the main app until **`emailVerified`** (resend + “I’ve verified” with **`reload`** + **`getIdToken(true)`**). **`syncUserPresence()`** runs only when verified. Deploy **`firestore.rules`**; enable **Email/Password** in Firebase Console (optionally **disable Anonymous**). Customize the verification email template under **Authentication → Templates**.
 - **Deploy:** `Dockerfile` + `.dockerignore`, **`docs/DEPLOY.md`** (env vars, `VITE_*` at build time).
 - **Past sessions UI:** Welcome → **Past sessions** loads **`users/{email}/debates`** (and merges legacy top-level **`debates`**) via **`fetchRecentDebates`**, **`DebateHistory.jsx`**.
 - **In-app reports:** During a debate, **Report issue** opens **`ReportIssue.jsx`** (category + details). **`submitReport`** writes Firestore **`reports`** (`reporterUid`, `topicId`, `roomId`, `yourSide`, `category`, `details`, `createdAt`). Rules: authenticated create with matching uid; read own reports only. **Client cooldown:** after a successful submit, **`localStorage`** **`chitchat:lastReportAt`** blocks another report for **90 seconds** (see **`chitChatFirestore.js`**). Modal closes on leave debate / peer disconnect.
@@ -157,7 +157,8 @@ Debate Website/
     HeaderNavMenu.jsx    # Menu dropdown: legal, Our Mission, Support
     MissionPage.jsx      # Our Mission (LegalDocumentShell)
     SupportPage.jsx      # Support / contact (LegalDocumentShell + contactEmail)
-    AuthScreen.jsx       # Email/password sign-in & sign-up + legal acknowledgments
+    AuthScreen.jsx       # Email/password sign-in & sign-up + legal + verification send on signup
+    VerifyEmailScreen.jsx # Gate until Firebase emailVerified; resend / reload / sign out
     AuthScreen.css       # Auth screen layout / card (pairs with global index.css tokens)
     BrandLogo.jsx        # Chitchat wordmark image
     legal/               # Legal pages + viewer (Terms, Privacy, Community Guidelines, Recording)
@@ -234,6 +235,7 @@ Copy `.env.example` to `.env` locally if needed (`.env` is gitignored). For Fire
 - **Custom lobby cleanup:** A server-side sweep runs every ~60s to remove orphaned/expired custom lobbies. When it changes state, it broadcasts the updated open-lobby list and logs a concise summary (orphaned/expired/recovered counts + codes).
 - **Planned next:** Run a production smoke-test matrix (Quick match + Custom open + Custom code-only + multi-tab safeguard recovery) and review metrics/cleanup logs for the first 24h; then tune `CUSTOM_LOBBY_TTL_MS` if needed and finish any remaining custom-mode copy consistency.
 - **Railway variables:** New/changed vars remain staged until **Apply changes** is clicked in the Railway UI.
+- **Verified email:** **`firestore.rules`** **`isSignedIn()`** requires **`request.auth.token.email_verified == true`**. The server rejects Socket.IO handshakes that present a valid token but **`email_verified !== true`** (so matchmaking cannot be used with throwaway unverified sessions when a token is sent). Unverified users still see **`VerifyEmailScreen`** and cannot open Socket.IO in **`App.jsx`** (`firebaseEmailVerified` gate).
 - **Production Socket.IO + Firebase:** With **`REQUIRE_FIREBASE_TOKEN`**, the client must **not** call `io()` until **`getIdToken()`** resolves; otherwise the handshake fails and matchmaking/custom lobbies break for all users. Implementation: **`await user.getIdToken()`** inside the socket bootstrap in **`App.jsx`**, then connect with **`auth: { token }`**. Do **not** put Firebase ID token in the `useEffect` dependency array (token refresh would reconnect and race matchmaking).
 - **Socket lifecycle:** Same as above—**`firebaseUserId`**-only deps for the socket effect; **`connect_error`** surfaces a visible error if the handshake fails.
 - **Production transport hardening:** Express SPA fallback now skips `/socket.io` routes to avoid polling transport interception in production builds.
@@ -253,6 +255,7 @@ Copy `.env.example` to `.env` locally if needed (`.env` is gitignored). For Fire
 
 Short bullets for the **latest** context; keep recent history; trim only when noisy.
 
+- **2026-03-28:** **Verified email gate** — **`sendEmailVerification`** on signup; **`VerifyEmailScreen`** + **`firebaseEmailVerified`** in **`App.jsx`**; Firestore **`isSignedIn()`** requires **`email_verified`**; Socket.IO middleware rejects verified-false tokens. Deploy **rules** after pull.
 - **2026-03-25:** **User-nested match + chat** — Server writes **`users/{email}/debates/{roomId}`** ( **`sessionKind: 'match'`** ) and **`.../chat_messages`** (duplicated per participant); no new **`match_sessions`** writes. **`await persistMatchSession`** before **`matched`**; **`debate-chat`** passes pro/con UIDs from room roster. Rules: nested **`chat_messages`** read for owner. **`moderationApi`** collectionGroup + legacy fallback. Pushed **`d7c5e55`**; production validated in Console (nested path).
 - **2026-03-25:** **Firestore profiles by email** — **`users/{email}`** doc ids (see prior **`DEV_LOG`** session); client **`userProfileDocId`**, nested **`debates`** for history.
 - **2026-03-23:** **Moderation API** — **`CHITCHAT_MODERATION_SECRET`**, **`/api/mod/*`** (**`moderationApi.js`**), Firestore **`moderation_actions`**, Auth disable/enable + audit; **`docs/MODERATION.md`**.

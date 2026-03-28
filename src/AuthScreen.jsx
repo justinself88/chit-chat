@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   createUserWithEmailAndPassword,
+  sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
 } from 'firebase/auth';
@@ -76,7 +77,12 @@ export default function AuthScreen() {
     setBusy(true);
     try {
       if (mode === 'signup') {
-        await createUserWithEmailAndPassword(auth, email.trim(), password);
+        const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+        try {
+          await sendEmailVerification(cred.user);
+        } catch {
+          /* user can use Resend on the verify screen */
+        }
       } else {
         await signInWithEmailAndPassword(auth, email.trim(), password);
       }
@@ -123,7 +129,8 @@ export default function AuthScreen() {
           </div>
           <h2 className="auth-screen-title">{mode === 'signin' ? 'Sign in' : 'Create account'}</h2>
           <p className="auth-screen-lead">
-            Chitchat — structured debate with people who disagree. Use your email to continue.
+            Chitchat — structured debate with people who disagree. Sign in with a real email; new accounts
+            must confirm the link we send before playing.
           </p>
 
           <div className="auth-tabs">

@@ -6,6 +6,7 @@ import { fetchRecentDebates, logDebateSessionEnd, syncUserPresence } from './chi
 import ReportIssue from './ReportIssue.jsx';
 import { onIdTokenChanged, signOut } from 'firebase/auth';
 import AuthScreen from './AuthScreen.jsx';
+import VerifyEmailScreen from './VerifyEmailScreen.jsx';
 import BrandLogo from './BrandLogo.jsx';
 import HeaderNavMenu from './HeaderNavMenu.jsx';
 import LegalViewer from './legal/LegalViewer.jsx';
@@ -56,6 +57,8 @@ export default function App() {
   const [camOn, setCamOn] = useState(true);
   const [connState, setConnState] = useState(null);
   const [firebaseUserId, setFirebaseUserId] = useState(null);
+  /** Must be true to use the app, Socket.IO, and Firestore (email/password users verify via link). */
+  const [firebaseEmailVerified, setFirebaseEmailVerified] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [videoDeviceId, setVideoDeviceId] = useState('');
   const [audioDeviceId, setAudioDeviceId] = useState('');
@@ -171,7 +174,8 @@ export default function App() {
     }
     const unsub = onIdTokenChanged(auth, (user) => {
       setFirebaseUserId(user?.uid ?? null);
-      if (user) syncUserPresence();
+      setFirebaseEmailVerified(Boolean(user?.emailVerified));
+      if (user?.emailVerified) syncUserPresence();
       setAuthReady(true);
     });
     return () => unsub();
@@ -192,7 +196,7 @@ export default function App() {
   }, [authReady, firebaseUserId, cleanupMedia]);
 
   useEffect(() => {
-    if (!isFirebaseConfigured || !firebaseUserId) return;
+    if (!isFirebaseConfigured || !firebaseUserId || !firebaseEmailVerified) return;
 
     let cancelled = false;
 
@@ -533,7 +537,7 @@ export default function App() {
     };
     // Handshake awaits getIdToken() so production REQUIRE_FIREBASE_TOKEN succeeds; effect deps
     // stay on firebaseUserId only so hourly token refresh does not reconnect Socket.IO.
-  }, [cleanupMedia, flushDebateLog, firebaseUserId]);
+  }, [cleanupMedia, flushDebateLog, firebaseUserId, firebaseEmailVerified]);
 
   const pickTopic = (id) => {
     setTopicId(id);
@@ -703,7 +707,10 @@ export default function App() {
   }, [camOn]);
 
   const showAuthScreen = authReady && isFirebaseConfigured && !firebaseUserId;
-  const showMainApp = authReady && isFirebaseConfigured && !!firebaseUserId;
+  const showVerifyEmail =
+    authReady && isFirebaseConfigured && !!firebaseUserId && !firebaseEmailVerified;
+  const showMainApp =
+    authReady && isFirebaseConfigured && !!firebaseUserId && firebaseEmailVerified;
 
   return (
     <>
@@ -734,7 +741,11 @@ export default function App() {
       )}
 
       <div
-        className={['app', showAuthScreen ? 'app--auth-only' : '', showMainApp ? 'app--with-global-header' : '']
+        className={[
+          'app',
+          showAuthScreen || showVerifyEmail ? 'app--auth-only' : '',
+          showMainApp ? 'app--with-global-header' : '',
+        ]
           .filter(Boolean)
           .join(' ')}
       >
@@ -754,7 +765,8 @@ export default function App() {
         </div>
       )}
 
-      {authReady && isFirebaseConfigured && !firebaseUserId && <AuthScreen />}
+      {showAuthScreen && <AuthScreen />}
+      {showVerifyEmail && <VerifyEmailScreen />}
 
       {showMainApp && (
         <>
