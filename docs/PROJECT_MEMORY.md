@@ -6,7 +6,7 @@
 |--------|--------|
 | **Site name** | **Chit Chat** |
 | **Project name (npm)** | `chit-chat` (workspace folder: `Debate Website`) |
-| **Last updated** | 2026-03-23 (operator moderation API + moderation_actions) |
+| **Last updated** | 2026-03-25 (match + in-debate chat under `users/{email}/debates/{roomId}`) |
 | **Database / BaaS** | **Firebase** — **Email/password Auth** + Firestore (`src/firebase.js`, `AuthScreen.jsx`) |
 
 ---
@@ -15,7 +15,7 @@
 
 **Goal (product: Chit Chat):** A site where a user picks a **debate topic**, chooses **Pro** or **Con**, gets **matched** with someone on the **opposing** side, then has a **live audio/video** conversation (WebRTC).
 
-**Current scope (MVP):** Matchmaking is **in-memory** on a single Node process. The app is **gatekept**: users must **sign in or create an account** (Firebase **Email/Password**) before any topic/debate UI. There are now two modes: **Quick match** (topic-based queue) and **Custom lobbies** (statement-based, room-code capable). **Firestore**: **`users/{uid}`** presence, **`debates`** session logs (`chitChatFirestore.js`). Socket.IO connects after login, and the server can verify Firebase ID tokens via Admin SDK. Enforcement is controlled by environment config (`REQUIRE_FIREBASE_TOKEN=true`). No moderation UI.
+**Current scope (MVP):** Matchmaking is **in-memory** on a single Node process. The app is **gatekept**: users must **sign in or create an account** (Firebase **Email/Password**) before any topic/debate UI. There are now two modes: **Quick match** (topic-based queue) and **Custom lobbies** (statement-based, room-code capable). **Firestore**: **`users/{email}`** presence (doc id = lowercased sign-in email), **`users/{email}/debates`** for history + server session rows (`chitChatFirestore.js`, `server/persistence.js`). Socket.IO connects after login, and the server can verify Firebase ID tokens via Admin SDK. Enforcement is controlled by environment config (`REQUIRE_FIREBASE_TOKEN=true`). No moderation UI.
 
 ---
 
@@ -44,20 +44,21 @@
 
 | Collection / path | Who writes | Purpose |
 |-------------------|------------|---------|
-| **`users/{email}`** | Client | Profile doc id = **sign-in email** (matches `auth.token.email`). Fields: `app`, `lastSeenAt`, **`uid`**, **`email`**. |
-| **`users/{email}/debates`** (docs) | Client (`logDebateSessionEnd`) | Per-user session log (same fields as before): topic/custom, side, duration, **`peerUid`**, etc. Drives **Past sessions**. |
-| **`users/{email}/text_chat`** (docs) | **Server only** (Admin) | One doc per line mirrored from in-debate chat: **`roomId`**, **`text`**, **`sentAtMs`**, **`fromUid`**, **`direction`** (`sent` \| `received`), **`peerUid`**, **`createdAt`**. Appears next to **`debates`** in Console. |
+| **`users/{email}`** | Client | Profile doc id = **sign-in email** (lowercase; matches `auth.token.email`). Fields: `app`, `lastSeenAt`, **`uid`**, **`email`**. *(Console may show “document does not exist” until presence runs but subcollections can still exist.)* |
+| **`users/{email}/debates`** (docs) | **Client** (`addDoc` in `logDebateSessionEnd`) | **Completed** debate rows: auto doc ids; fields include `topicId`, `yourSide`, **`roomId`**, duration, **`peerUid`**, custom metadata. Drives **Past sessions** (sorted by `endedAtMs`). |
+| **`users/{email}/debates/{roomId}`** | **Server only** (Admin) | **Live match** row when Firebase Auth emails exist for both players: **`sessionKind: 'match'`**, **`roomId`**, **`proUid`**, **`conUid`**, **`topicId`**, **`matchMode`**, **`roomCode`**, **`statement`**, **`startedAt`**, **`updatedAt`**. Doc id = Socket.IO **`roomId`** from **`matched`**. Same doc id under **each** participant’s tree. |
+| **`users/{email}/debates/{roomId}/chat_messages`** | **Server only** (Admin) | Append-only in-debate text: **`authorUid`**, **`authorSocketId`**, **`text`**, **`sentAtMs`**, **`createdAt`**. Each message stored **twice** (once per participant path). |
+| **`users/{email}/text_chat`** (docs) | — | **Legacy** (older deploy mirrored chat here). Current server uses **`debates/.../chat_messages`** only. Rules may still allow read for old rows. |
 | **`debates`** (top-level, legacy) | — | **Creates disabled** in rules. Old rows still **readable** by owner; app merges legacy + nested when loading history. |
 | **`reports`** (docs) | Client (`submitReport`) | Moderation tickets with **optional `peerUid`**, **`matchMode`**, room/topic context. |
-| **`match_sessions/{roomId}`** | **Server only** (Firebase Admin) | Canonical match: **`proUid`**, **`conUid`**, **`topicId`**, **`matchMode`**, **`roomCode`**, **`statement`**, timestamps. Written on **`matched`**. **Not readable by clients** (rules deny); use Console / future admin API. |
-| **`match_sessions/{roomId}/chat_messages`** | **Server only** (Admin) | Append-only chat lines: **`authorUid`**, **`authorSocketId`**, **`text`**, **`sentAtMs`**. Written when **`debate-chat`** is relayed. |
+| **`match_sessions/{roomId}`** (+ **`chat_messages`**) | — | **Legacy** top-level data from older server builds. **Current server does not write here.** Rules deny clients; moderation **`GET /api/mod/match/:roomId`** still **falls back** to these paths if no user-nested session is found. |
 | **`moderation_actions`** (docs) | **Server only** (Admin) | Operator audit log: **`targetUid`**, **`action`**, **`reason`**, **`actorLabel`**, optional report/room refs, **`createdAt`**. Written via **`POST /api/mod/actions`** or auth disable/enable routes. |
 
-Persistence helpers live in **`server/persistence.js`**. If Firebase Admin is **not** initialized locally, server **skips** `match_sessions` / chat writes (client **`debates`** / **`reports`** still work).
+Persistence helpers live in **`server/persistence.js`**. **`persistMatchSession`** / **`persistChatMessage`** require Firebase Admin + Auth (**`getUser`** for email). If Admin is **not** initialized locally, server **skips** these writes (client **`debates`** / **`reports`** still work). **`matched`** handlers **`await`** session persistence before emitting **`matched`** so debate parent docs exist before chat.
 
-**Operator API:** **`server/moderationApi.js`** mounts **`/api/mod/*`** when **`CHITCHAT_MODERATION_SECRET`** is set (16+ chars). Lists reports, loads **`match_sessions`** + chat, lists user **`debates`**, logs **`moderation_actions`**, and can **disable/enable** Firebase Auth users. See **`docs/MODERATION.md`**. **HTTPS + secret rotation** in production.
+**Operator API:** **`server/moderationApi.js`** mounts **`/api/mod/*`** when **`CHITCHAT_MODERATION_SECRET`** is set (16+ chars). **`GET /api/mod/match/:roomId`** loads session + chat via **collection group** on **`debates`** (`sessionKind == 'match'` and **`roomId`**), then legacy **`match_sessions`** if needed. **`GET /api/mod/user/:uid/sessions`** prefers **`users/{email}/debates`** with **`sessionKind`**, merges legacy **`match_sessions`**. Lists reports, user **`debates`**, audit actions; can **disable/enable** Auth users. See **`docs/MODERATION.md`**. **Collection-group** index on **`debates`** may be required for the match query (Firebase Console link if missing). **HTTPS + secret rotation** in production.
 
-**Deploy:** Update **`firestore.rules`** in Firebase Console when `peerUid` / `match_sessions` rules change.
+**Deploy:** Keep **`firestore.rules`** in sync with repo — especially **`users/.../debates/.../chat_messages`** (client read own docs only; no client writes).
 
 ---
 
@@ -143,7 +144,7 @@ Debate Website/
   server/
     index.js             # Express, Socket.IO, queues, routes
     moderationApi.js     # Operator-only /api/mod (reports, sessions, audit, auth disable)
-    persistence.js       # Firestore Admin: match_sessions + chat_messages
+    persistence.js       # Firestore Admin: users/{email}/debates/{roomId} + chat_messages
     rateLimit.js         # Fixed-window limiter + client IP helper
     rtcConfig.js         # ICE config from env + defaults
   shared/
@@ -252,8 +253,10 @@ Copy `.env.example` to `.env` locally if needed (`.env` is gitignored). For Fire
 
 Short bullets for the **latest** context; keep recent history; trim only when noisy.
 
+- **2026-03-25:** **User-nested match + chat** — Server writes **`users/{email}/debates/{roomId}`** ( **`sessionKind: 'match'`** ) and **`.../chat_messages`** (duplicated per participant); no new **`match_sessions`** writes. **`await persistMatchSession`** before **`matched`**; **`debate-chat`** passes pro/con UIDs from room roster. Rules: nested **`chat_messages`** read for owner. **`moderationApi`** collectionGroup + legacy fallback. Pushed **`d7c5e55`**; production validated in Console (nested path).
+- **2026-03-25:** **Firestore profiles by email** — **`users/{email}`** doc ids (see prior **`DEV_LOG`** session); client **`userProfileDocId`**, nested **`debates`** for history.
 - **2026-03-23:** **Moderation API** — **`CHITCHAT_MODERATION_SECRET`**, **`/api/mod/*`** (**`moderationApi.js`**), Firestore **`moderation_actions`**, Auth disable/enable + audit; **`docs/MODERATION.md`**.
-- **2026-03-23:** **Debate data model** — Server writes **`match_sessions`** + **`chat_messages`** (Admin SDK). **`matched`** includes **`peerUid`**; **`debates`** / **`reports`** / Play history UI enriched; **`firestore.rules`** updated (**`match_sessions`** denied to clients). **`server/persistence.js`**.
+- **2026-03-23:** **Debate data model (first pass)** — Top-level **`match_sessions`** + chat (Admin). Superseded **2026-03-25** by **`users/{email}/debates/{roomId}`** + **`chat_messages`**; legacy **`match_sessions`** may remain in older projects.
 - **2026-03-23:** **Socket.IO auth before connect** — `App.jsx` awaits **`getIdToken()`** before **`io()`** so Railway/production **`REQUIRE_FIREBASE_TOKEN`** handshakes succeed; removed unused **`firebaseIdToken`** React state. **`docs/DEV_LOG.md`** + **`PROJECT_MEMORY.md`** updated.
 - **2026-03-22:** **Docs pass** — **`PROJECT_MEMORY`** / **`DEV_LOG`** updated; **§2** + file map now spell out **`ReportIssue`**, **`reports`**, and **90s report cooldown** (`localStorage` key `chitchat:lastReportAt`).
 - **2026-03-23:** **Custom mode overhaul** — two custom tabs (**Join servers** / **Create server**), **Join by code** restored, creation visibility (`open` vs `code-only`), creator stays in waiting lobby after challenger leaves, copy confirmation (`✓ Copied`), and Firestore alignment (`topicId: "custom"` + optional debates fields in rules).

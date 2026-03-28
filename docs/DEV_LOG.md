@@ -6,6 +6,30 @@ Chronological record of **what changed** and **why**. **`PROJECT_MEMORY.md`** ho
 
 ---
 
+## Session: 2026-03-25 (server: match + in-debate chat under `users/{email}/debates/{roomId}`)
+
+### Summary
+
+- **Canonical path:** New match metadata and in-debate text chat live under **`users/{lowercaseEmail}/debates/{roomId}`**, where **`roomId`** is the Socket.IO room id from **`matched`**. Session rows include **`sessionKind: 'match'`**, **`proUid`**, **`conUid`**, topic/custom fields, and timestamps.
+- **`chat_messages`** subcollection: each **`debate-chat`** line is appended under **both** participants’ debate docs (Admin SDK). Removed **`text_chat`** mirroring and **stopped writing** top-level **`match_sessions`** (legacy docs unchanged; moderation API still reads them as fallback).
+- **Server:** **`await persistMatchSession`** before **`matched`**; **`getRoomProConUids`** supplies pro/con UIDs for **`persistChatMessage`**.
+- **Rules:** nested **`chat_messages`** under **`debates`** — own-doc read only; Admin writes only.
+- **Moderation:** **`GET /api/mod/match/:roomId`** uses **`collectionGroup('debates')`** with **`sessionKind`** + **`roomId`**; legacy **`match_sessions`** fallback. **`GET /api/mod/user/:uid/sessions`** prefers nested **`sessionKind`** rows + merges legacy.
+
+### Files
+
+- `server/persistence.js`, `server/index.js`, `server/moderationApi.js`, `firestore.rules`, `.env.example`, `docs/PROJECT_MEMORY.md`, `docs/DEV_LOG.md`
+
+### Deploy
+
+- Publish **`firestore.rules`**. Redeploy Node server. Add Firestore **collection group** index if **`/api/mod/match/...`** requests fail with an index error.
+
+### Follow-ups
+
+- Optional migration from old **`match_sessions`** if full historical parity in user trees is required.
+
+---
+
 ## Session: 2026-03-25 (Firestore: users by email + debates subcollection)
 
 ### Summary

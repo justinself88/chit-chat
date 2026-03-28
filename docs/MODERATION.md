@@ -1,10 +1,12 @@
 # Operator moderation API
 
-Internal tools for **investigations**, **audit trails**, and **account enforcement**. Data lives in **Firestore** (`reports`, **`users/{email}/debates`**, legacy top-level `debates`, `match_sessions`, `chat_messages`, `moderation_actions`) and **Firebase Auth** (enable/disable user).
+Internal tools for **investigations**, **audit trails**, and **account enforcement**. Data lives in **Firestore** (`reports`, **`users/{email}/debates`** including **`sessionKind: 'match'`** rows and nested **`chat_messages`**, legacy top-level **`debates`**, legacy **`match_sessions`** / **`chat_messages`**, **`moderation_actions`**) and **Firebase Auth** (enable/disable user).
+
+**Current server model:** New match + chat are written only under **`users/{lowercaseEmail}/debates/{roomId}`** and **`.../chat_messages`**. Top-level **`match_sessions`** is **legacy** (older deploys); the API still reads it if no user-nested session is found.
 
 ## Prerequisites
 
-1. **Firebase Admin** on the Node server (`FIREBASE_ADMIN_SERVICE_ACCOUNT` or ADC), same as Socket.IO / `match_sessions` persistence.
+1. **Firebase Admin** on the Node server (`FIREBASE_ADMIN_SERVICE_ACCOUNT` or ADC), same as Socket.IO and Firestore persistence.
 2. **`CHITCHAT_MODERATION_SECRET`** — long random string (16+ characters). On Railway or `.env` for local server **only** (never commit real values; never expose in the browser).
 
 ## Authentication
@@ -37,15 +39,25 @@ With Vite dev, paths under `/api` proxy to port **3001** — e.g. `http://localh
 
 ### Match + chat (by WebRTC / Socket room id)
 
-`GET /api/mod/match/:roomId?chatLimit=200` — `match_sessions` doc (if any) and `chat_messages` (ordered by time).
+`GET /api/mod/match/:roomId?chatLimit=200`
+
+- **Primary:** **Collection group** query on subcollections named **`debates`**: **`sessionKind == 'match'`** and **`roomId == :roomId`**. Loads session fields from the first matching doc and **`chat_messages`** ordered by **`sentAtMs`** (asc).
+- **Fallback:** If nothing is found, reads legacy **`match_sessions/{roomId}`** and **`match_sessions/{roomId}/chat_messages`** (pre–user-nested data).
+
+Response shape: `{ roomId, session, chat_messages }` (`session` may be `null`).
 
 ### Per-user debate rows (self-logged client history)
 
 `GET /api/mod/user/:uid/debates?limit=40` — **`users/{email}/debates`** for that Auth user’s email plus legacy top-level **`debates`** rows with the same `uid` (merged, Admin SDK).
 
-### Per-user canonical matches
+### Per-user canonical matches (server-logged sessions)
 
-`GET /api/mod/user/:uid/sessions?limit=40` — **`match_sessions`** where the user is **pro** or **con**, merged.
+`GET /api/mod/user/:uid/sessions?limit=40`
+
+- **Primary:** **`users/{email}/debates`** where **`sessionKind == 'match'`** (resolved via Auth email for `uid`), sorted by **`startedAt`** descending in the handler.
+- **Merged:** Legacy **`match_sessions`** where **`proUid`** or **`conUid`** equals `uid` (rows not already present). Legacy entries may include **`_legacyPath: 'match_sessions'`**.
+
+Response: `{ uid, userEmail, count, match_sessions }` (array name unchanged for tooling compatibility).
 
 ### Moderation audit log
 
@@ -100,12 +112,15 @@ curl -sS -X POST -H "Content-Type: application/json" \
 
 ## Firestore rules
 
-Deploy the repo’s **`firestore.rules`**. The **`moderation_actions`** collection must remain **client-deny**; only the server writes there via Admin SDK.
+Deploy the repo’s **`firestore.rules`**. The **`moderation_actions`** collection must remain **client-deny**; only the server writes there via Admin SDK. Client users may **read** their own **`users/{email}/debates/.../chat_messages`**; only Admin may write.
 
 ## Indexes
 
-If Firestore returns an error with a link to **create an index**, open the link (usually for `orderBy('createdAt')` on `reports` or `moderation_actions`). Deploy the suggested index.
+If Firestore returns an error with a link to **create an index**, open the link and deploy the suggested index. Typical cases:
+
+- **`orderBy('createdAt')`** on **`reports`** or **`moderation_actions`**.
+- **`GET /api/mod/match/:roomId`:** **Collection group** index on **`debates`** for **`sessionKind`** + **`roomId`** (equality filters). Firebase usually provides a one-click URL in the error.
 
 ## Console workflow (no HTTP)
 
-You can still use **Firebase Console → Firestore** to browse `reports`, `match_sessions`, etc., when logged in as a project owner. The HTTP API is for scripted access, backups, and tying actions to **`moderation_actions`**.
+Use **Firebase Console → Firestore** as project owner: browse **`reports`**, **`users/{email}/debates/{roomId}`** (session row) and **`chat_messages`**, and legacy **`match_sessions`** if present. The HTTP API is for scripted access, backups, and tying actions to **`moderation_actions`**.
